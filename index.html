@@ -932,6 +932,178 @@ B.lamp = p => {
   return g;
 };
 
+/* ---------- Extended catalog (original models) ---------- */
+const STONE_TEX = canvasTex(256, (g, s) => {
+  const r = rng(81); g.fillStyle = '#4e4a44'; g.fillRect(0, 0, s, s);
+  let y = 0; while (y < s) { const h = 18 + r() * 22; let x = -r() * 40; while (x < s) { const w = 30 + r() * 50, v = 120 + r() * 70 | 0, tint = r() * 20 | 0; g.fillStyle = `rgb(${v + tint},${v + tint * .6 | 0},${v - 8})`; g.beginPath(); g.moveTo(x + 3, y + 3 + r() * 3); g.lineTo(x + w - 3, y + 2 + r() * 3); g.lineTo(x + w - 2 - r() * 3, y + h - 3); g.lineTo(x + 2 + r() * 3, y + h - 2); g.closePath(); g.fill(); for (let k = 0; k < 14; k++) { g.fillStyle = `rgba(${r() > .5 ? '255,255,255' : '0,0,0'},.08)`; g.fillRect(x + r() * w, y + r() * h, 2 + r() * 4, 1 + r() * 2); } x += w; } y += h; }
+}, 1);
+const stoneMat = () => mat('stoneM', () => new THREE.MeshStandardMaterial({ map: STONE_TEX, normalMap: normalFrom(STONE_TEX, 5), normalScale: new THREE.Vector2(1.4, 1.4), roughness: .95 }));
+// Box whose UVs are in metres, so tiled textures keep their real size (texture covers 1.6 m)
+function boxM(w, h, d, k = 1 / 1.6) {
+  const g = new THREE.BoxGeometry(w, h, d), uv = g.attributes.uv, S = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++) for (let i = 0; i < 4; i++) { const ix = f * 4 + i; uv.setXY(ix, uv.getX(ix) * S[f][0] * k, uv.getY(ix) * S[f][1] * k); }
+  return g;
+}
+const fireMat = () => mat('fire', () => { const m = new THREE.MeshStandardMaterial({ color: 0xff8a2a, emissive: 0xff6a10, emissiveIntensity: 1 }); m.userData.base = 1.4; glowMats.add(m); return m; });
+const flames = (g, x, y, z, rad, n = 6, seed = 8) => { const r = rng(seed); for (let i = 0; i < n; i++) g.add(M(new THREE.ConeGeometry(.06 + r() * .07, .25 + r() * .3, 5), fireMat(), x + (r() - .5) * rad, y + .15, z + (r() - .5) * rad, false)); };
+const jetMat = new THREE.MeshPhongMaterial({ color: 0xcfefff, specular: 0xffffff, shininess: 110, transparent: true, opacity: .7, envMap: envCube, reflectivity: .4, combine: THREE.MixOperation, depthWrite: false });
+const steel = () => std('#c9cdd0', { metalness: .85, roughness: .28 });
+const bronze = () => std('#8a6a3e', { metalness: .7, roughness: .35 });
+const woodM = c => mat('woodM' + c, () => new THREE.MeshStandardMaterial({ color: c, map: TEX.wood, normalMap: normalFrom(TEX.wood, 3), roughness: .6 }));
+const splash = (g, x, z, s = .25) => { const f = new THREE.Mesh(new THREE.CircleGeometry(s, 16), foamMat); f.rotation.x = -Math.PI / 2; f.position.set(x, -.1, z); f.renderOrder = 3; g.add(f); };
+// Arc of water from (0,y0,0) landing at distance L
+function arcGeo(L, peak, y0, y1, r = .025) { const c = new THREE.CatmullRomCurve3(Array.from({ length: 9 }, (_, i) => { const t = i / 8; return new THREE.Vector3(0, y0 + (y1 - y0) * t + 4 * peak * t * (1 - t), L * t); })); return new THREE.TubeGeometry(c, 24, r, 6, false); }
+
+B.jets = p => {
+  const g = new THREE.Group(), n = Math.round(p.n || 1);
+  for (let i = 0; i < n; i++) { const x = (i - (n - 1) / 2) * .7; g.add(M(new THREE.CylinderGeometry(.05, .06, .05, 12), steel(), x, .03, 0)); const a = new THREE.Mesh(arcGeo(p.w, p.w * .32, .06, -.12, .022), jetMat); a.position.x = x; a.renderOrder = 2; g.add(a); splash(g, x, p.w, .16); }
+  return g;
+};
+B.scupper = p => {
+  const g = new THREE.Group(), n = Math.round(p.n || 3), w = Math.max(1.2, n * .9);
+  g.add(M(boxM(w, p.h, .45), stoneMat(), 0, p.h / 2, -.3));
+  g.add(M(boxM(w + .08, .06, .55), mat('capM', () => new THREE.MeshStandardMaterial({ map: TEX.trav, roughness: .8 })), 0, p.h + .03, -.3));
+  for (let i = 0; i < n; i++) { const x = (i - (n - 1) / 2) * (w / n); g.add(M(new THREE.BoxGeometry(.16, .07, .22), bronze(), x, p.h * .8, -.02)); const a = new THREE.Mesh(arcGeo(.55 + p.h * .25, .05, p.h * .8 - .02, -.12, .035), jetMat); a.position.set(x, 0, .05); a.scale.x = 2.2; a.renderOrder = 2; g.add(a); splash(g, x, .6 + p.h * .25, .2); }
+  return g;
+};
+B.bubbler = p => {
+  const g = new THREE.Group();
+  [[.18, .22], [.12, .32], [.07, .4]].forEach(([r, h]) => { const d = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), jetMat); d.scale.y = h / r; d.position.y = -.12; d.renderOrder = 2; g.add(d); });
+  const f = new THREE.Mesh(new THREE.RingGeometry(.15, .38, 24), foamMat); f.rotation.x = -Math.PI / 2; f.position.y = -.11; f.renderOrder = 3; g.add(f);
+  return g;
+};
+B.firebowl = p => {
+  const g = new THREE.Group(), c = std(p.color || '#7a746c', { roughness: .9 });
+  if (p.ped !== false) g.add(M(new THREE.CylinderGeometry(.22, .26, p.h, 16), c, 0, p.h / 2, 0));
+  const bowl = new THREE.LatheGeometry([[0, 0], [.2, 0], [.45, .12], [.55, .3], [.52, .3], [.42, .16], [0, .14]].map(([x, y]) => new THREE.Vector2(x, y)), 28);
+  g.add(M(bowl, c, 0, p.h, 0)); g.add(M(new THREE.CylinderGeometry(.42, .42, .03, 20), std('#2d2a27'), 0, p.h + .2, 0, false)); flames(g, 0, p.h + .2, 0, .5, 7, 12);
+  return g;
+};
+B.cypress = p => {
+  const g = new THREE.Group(), col = '#3f6a32', fol = new Foliage(p.h * 43 | 0), h = p.h, R = h * .11;
+  g.add(M(new THREE.CylinderGeometry(.06, .1, .5, 8), barkMat(), 0, .25, 0));
+  for (let i = 0; i < 7; i++) { const t = i / 6, y = .35 + t * (h - .6), rr = R * Math.sin(Math.PI * Math.min(.95, .18 + t * .82)) + .08; fol.clump(0, y, 0, rr, h * .12, rr, 34, .34); g.add(coreMesh(col, 0, y, 0, rr * .75, h * .1, rr * .75)); }
+  g.add(fol.mesh(col)); return g;
+};
+B.grass = p => {
+  const g = new THREE.Group(), r = rng(p.s * 97 | 0), P = [], I = [], s = p.s;
+  for (let b = 0; b < 90; b++) {
+    const a = r() * 6.28, out = .35 + r() * .55, H = s * (.6 + r() * .5), w = .018 * s, base = P.length / 3, ox = Math.cos(a) * r() * .08 * s, oz = Math.sin(a) * r() * .08 * s;
+    for (let k = 0; k <= 5; k++) { const t = k / 5, rad = Math.sin(t * out * 1.6) * H * .55 * out, y = H * Math.sin(t * 1.35) / Math.sin(1.35) * (1 - t * out * .25), ww = w * (1 - t * .9); const x = ox + Math.cos(a) * rad, z = oz + Math.sin(a) * rad; P.push(x - Math.sin(a) * ww, y, z + Math.cos(a) * ww, x + Math.sin(a) * ww, y, z - Math.cos(a) * ww); if (k < 5) { const q = base + k * 2; I.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); } }
+  }
+  const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setIndex(I); geo.computeVertexNormals();
+  g.add(M(geo, std(p.color || '#9aa25a', { side: THREE.DoubleSide, roughness: .8 })));
+  if (p.plume !== false) { const pm = std('#e8dcc0', { roughness: 1 }); for (let i = 0; i < 9; i++) { const a = r() * 6.28, d = r() * .25 * s, h = s * (1.1 + r() * .3); const pl = M(new THREE.SphereGeometry(.05 * s, 6, 6), pm, Math.cos(a) * d, h, Math.sin(a) * d); pl.scale.y = 3; pl.rotation.z = (r() - .5) * .5; g.add(pl); const st = M(new THREE.CylinderGeometry(.005, .005, h, 3), pm, Math.cos(a) * d * .5, h / 2, Math.sin(a) * d * .5, false); g.add(st); } }
+  return g;
+};
+B.bird = p => {
+  const g = new THREE.Group(), r = rng(p.s * 51 | 0), s = p.s, lm = std('#3f7a3a', { side: THREE.DoubleSide, roughness: .55 }), stm = std('#5a7d40');
+  const leaf = new THREE.Shape(); leaf.moveTo(0, 0); leaf.quadraticCurveTo(.16, .25, 0, .7); leaf.quadraticCurveTo(-.16, .25, 0, 0); const lg = new THREE.ShapeGeometry(leaf, 8);
+  { const pp = lg.attributes.position; for (let i = 0; i < pp.count; i++) pp.setZ(i, Math.abs(pp.getX(i)) * .35 - pp.getY(i) * pp.getY(i) * .25); lg.computeVertexNormals(); }
+  for (let i = 0; i < 11; i++) {
+    const a = i / 11 * 6.28 + r() * .4, tilt = .15 + r() * .45, H = s * (.55 + r() * .45), lw = new THREE.Group(); lw.rotation.y = a;
+    const stem = M(new THREE.CylinderGeometry(.012, .018, H, 5), stm, 0, H / 2, 0); lw.add(stem); const l = M(lg, lm, 0, H, 0); l.scale.setScalar(s * (.9 + r() * .4)); l.rotation.x = -.15; lw.add(l); lw.rotateX(tilt); g.add(lw);
+  }
+  for (let i = 0; i < 4; i++) { const a = r() * 6.28, d = r() * .15 * s, fl = new THREE.Group(), H = s * (.9 + r() * .3); fl.position.set(Math.cos(a) * d, H, Math.sin(a) * d); fl.rotation.y = a;
+    fl.add(M(new THREE.CylinderGeometry(.01, .01, H, 4), stm, 0, -H / 2, 0, false)); const beak = M(new THREE.ConeGeometry(.035, .22, 5), std('#4a5d6e'), .08, 0, 0, false); beak.rotation.z = -Math.PI / 2; fl.add(beak);
+    for (let k = 0; k < 3; k++) { const pet = M(new THREE.ConeGeometry(.02, .18, 4), std('#f08a1e', { roughness: .5 }), .05, .08, (k - 1) * .03, false); pet.rotation.z = -.4 - k * .15; fl.add(pet); } g.add(fl); }
+  return g;
+};
+B.topiary = p => {
+  const g = new THREE.Group(), col = '#3d6f2e', s = p.s, pot = std('#e9e5dc', { roughness: .85 });
+  g.add(M(new THREE.LatheGeometry([[0, 0], [.22, 0], [.28, .4], [.31, .42], [.31, .45], [0, .45]].map(([x, y]) => new THREE.Vector2(x * s, y * s)), 20), pot));
+  const fol = new Foliage(s * 61 | 0), shape = p.shape || 'ball', balls = shape === 'triple' ? [[.85, .3], [1.45, .24], [1.95, .18]] : shape === 'cone' ? [] : [[1.0, .42]];
+  if (shape !== 'ball') g.add(M(new THREE.CylinderGeometry(.025 * s, .03 * s, 1.9 * s, 6), barkMat(), 0, 1.3 * s, 0));
+  balls.forEach(([y, rr]) => { fol.clump(0, y * s, 0, rr * s, rr * s, rr * s, 70, .16 * s); g.add(coreMesh(col, 0, y * s, 0, rr * s * .85, rr * s * .85, rr * s * .85)); });
+  if (shape === 'cone') for (let i = 0; i < 6; i++) { const t = i / 5, y = (.6 + t * 1.3) * s, rr = (.42 * (1 - t) + .06) * s; fol.clump(0, y, 0, rr, .2 * s, rr, 34, .15 * s); g.add(coreMesh(col, 0, y, 0, rr * .85, .17 * s, rr * .85)); }
+  g.add(fol.mesh(col)); return g;
+};
+B.daybed = p => {
+  const g = new THREE.Group(), fr = woodM('#d8cfc2'), cu = fabric(p.color), dr = mat('drape' + p.color, () => new THREE.MeshStandardMaterial({ color: p.color, map: FABRIC_TEX, side: THREE.DoubleSide, roughness: 1, transparent: true, opacity: .92 }));
+  g.add(M(RBox(2.1, .32, 2.1, .03), fr, 0, .16, 0)); g.add(M(RBox(1.95, .16, 1.95, .07), cu, 0, .4, 0));
+  [-.6, 0, .6].forEach(x => { const c = M(RBox(.55, .4, .14, .07), fabric(x ? '#f4efe6' : '#e9dcc4'), x, .62, -.85); c.rotation.x = -.25; g.add(c); });
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => g.add(M(new THREE.BoxGeometry(.08, 2.2, .08), fr, a * 1.01, 1.1, b * 1.01)));
+  [-1, 1].forEach(b => { g.add(M(new THREE.BoxGeometry(2.1, .08, .08), fr, 0, 2.2, b * 1.01)); g.add(M(new THREE.BoxGeometry(.08, .08, 2.1), fr, b * 1.01, 2.2, 0)); });
+  g.add(M(new THREE.PlaneGeometry(2.05, 2.05), dr, 0, 2.18, 0)).rotation.x = Math.PI / 2;
+  [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([a, b]) => { const geo = new THREE.PlaneGeometry(.5, 2.1, 6, 1), ps = geo.attributes.position; for (let i = 0; i < ps.count; i++) ps.setZ(i, Math.sin(ps.getX(i) * 25) * .04); geo.computeVertexNormals(); const d = M(geo, dr, a * .95, 1.15, b * 1.06); d.rotation.y = a * b > 0 ? .3 : -.3; g.add(d); });
+  return g;
+};
+B.barset = p => {
+  const g = new THREE.Group(), n = Math.max(2, Math.round(p.w / .65));
+  g.add(M(boxM(p.w, 1.0, .5), stoneMat(), 0, .5, -.1));
+  g.add(M(boxM(p.w + .1, .05, .75), mat('quartz', () => new THREE.MeshStandardMaterial({ color: '#efece6', roughness: .25 })), 0, 1.07, 0));
+  for (let i = 0; i < n; i++) { const x = (i - (n - 1) / 2) * (p.w / n), st = new THREE.Group(); st.position.set(x, 0, .55);
+    st.add(M(new THREE.CylinderGeometry(.18, .18, .02, 16), std('#2b2b2b', { metalness: .6, roughness: .4 }), 0, .01, 0)); st.add(M(new THREE.CylinderGeometry(.025, .025, .7, 8), steel(), 0, .36, 0));
+    st.add(M(new THREE.TorusGeometry(.16, .012, 6, 18), steel(), 0, .3, 0)).rotation.x = Math.PI / 2; st.add(M(RBox(.4, .07, .4, .03), fabric(p.color), 0, .74, 0)); st.add(M(RBox(.38, .22, .05, .02), woodM('#9a6a43'), 0, .9, .19)); g.add(st); }
+  return g;
+};
+B.adirondack = p => {
+  const g = new THREE.Group(), w = std(p.color, { roughness: .7 });
+  [-.3, .3].forEach(x => { g.add(M(new THREE.BoxGeometry(.04, .55, .7), w, x, .3, 0)).rotation.x = .1; g.add(M(new THREE.BoxGeometry(.14, .03, .78), w, x + Math.sign(x) * .05, .6, .02)); g.add(M(new THREE.BoxGeometry(.05, .6, .05), w, x, .3, .32)); });
+  for (let i = 0; i < 6; i++) g.add(M(new THREE.BoxGeometry(.58, .025, .09), w, 0, .4 - i * .025, .3 - i * .1));
+  for (let i = 0; i < 7; i++) { const a = (i - 3) * .06, sl = M(new THREE.BoxGeometry(.075, .9, .02), w, Math.sin(a) * .5, .75, -.32); sl.rotation.set(-.35, 0, -a); g.add(sl); }
+  return g;
+};
+B.swing = p => {
+  const g = new THREE.Group(), fr = std('#2b2d30', { metalness: .5, roughness: .45 }), rat = mat('rattan', () => new THREE.MeshStandardMaterial({ map: canvasTex(64, (gg, s) => { gg.fillStyle = '#b08a5a'; gg.fillRect(0, 0, s, s); gg.strokeStyle = '#7a5a34'; gg.lineWidth = 2; for (let i = -s; i < s * 2; i += 8) { gg.beginPath(); gg.moveTo(i, 0); gg.lineTo(i + s, s); gg.stroke(); gg.beginPath(); gg.moveTo(i + s, 0); gg.lineTo(i, s); gg.stroke(); } }, 4), side: THREE.DoubleSide, roughness: .8 }));
+  g.add(M(new THREE.CylinderGeometry(.35, .38, .04, 24), fr, 0, .02, 0)); const pole = new THREE.CatmullRomCurve3([[0, .04, 0], [0, 1.4, -.05], [.05, 1.9, .1], [.3, 2.05, .2], [.55, 2.0, .2]].map(v => new THREE.Vector3(...v)).map(v => v.set(v.x - .55, v.y, v.z))); 
+  g.add(M(new THREE.TubeGeometry(pole, 20, .035, 8, false), fr)).position.x = .55;
+  g.add(M(new THREE.CylinderGeometry(.008, .008, .5, 4), fr, .55, 1.75, .2, false));
+  const basket = new THREE.SphereGeometry(.55, 24, 16, Math.PI * .15, Math.PI * 1.7, 0, Math.PI * .8); const b = M(basket, rat, .55, 1.0, .2); b.scale.set(1, 1.25, 1); b.rotation.y = Math.PI / 2 + Math.PI; g.add(b);
+  g.add(M(new THREE.CylinderGeometry(.42, .42, .12, 20), fabric(p.color), .55, .62, .2));
+  return g;
+};
+B.gazebo = p => {
+  const g = new THREE.Group(), R = p.w / 2, h = 2.6, wood = woodM(p.color || '#e8e2d6'), n = 6;
+  g.add(M(new THREE.CylinderGeometry(R, R, .15, n), mat('gzFloor', () => new THREE.MeshStandardMaterial({ map: TEX.wood, roughness: .65 })), 0, .075, 0));
+  for (let i = 0; i < n; i++) { const a = i / n * 6.28, x = Math.cos(a) * (R - .12), z = Math.sin(a) * (R - .12); g.add(M(new THREE.BoxGeometry(.14, h, .14), wood, x, h / 2 + .15, z));
+    if (i !== 0) { const a2 = (i + 1) / n * 6.28, x2 = Math.cos(a2) * (R - .12), z2 = Math.sin(a2) * (R - .12), len = Math.hypot(x2 - x, z2 - z), rl = M(new THREE.BoxGeometry(len, .08, .06), wood, (x + x2) / 2, .95, (z + z2) / 2); rl.rotation.y = -Math.atan2(z2 - z, x2 - x); g.add(rl);
+      for (let k = 1; k < 6; k++) { const t = k / 6; g.add(M(new THREE.BoxGeometry(.04, .75, .04), wood, x + (x2 - x) * t, .55, z + (z2 - z) * t)); } } }
+  const roofM = mat('roofM', () => new THREE.MeshStandardMaterial({ map: ROOF_TEX, normalMap: normalFrom(ROOF_TEX, 5), roughness: .75 }));
+  g.add(M(new THREE.CylinderGeometry(R + .25, R + .25, .14, n), wood, 0, h + .2, 0)); g.add(M(new THREE.ConeGeometry(R + .45, 1.5, n), roofM, 0, h + 1.02, 0)); g.add(M(new THREE.ConeGeometry(.14, .4, n), wood, 0, h + 1.9, 0));
+  return g;
+};
+B.fountain = p => {
+  const g = new THREE.Group(), s = p.s, st = std(p.color || '#d9d2c3', { roughness: .85 }), lath = pts => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x * s, y * s)), 40);
+  g.add(M(lath([[1.2, 0], [1.25, 0], [1.25, .45], [1.12, .48], [1.1, .1], [0, .1]]), st));
+  const w1 = new THREE.Mesh(new THREE.CircleGeometry(1.1 * s, 40), waterMat); w1.rotation.x = -Math.PI / 2; w1.position.y = .38 * s; g.add(w1);
+  g.add(M(lath([[.22, 0], [.16, .3], [.12, .9], [.18, 1.1], [0, 1.1]]), st));
+  g.add(M(lath([[0, 1.05], [.15, 1.05], [.6, 1.25], [.62, 1.32], [.56, 1.3], [0, 1.2]]), st));
+  const w2 = new THREE.Mesh(new THREE.CircleGeometry(.55 * s, 32), waterMat); w2.rotation.x = -Math.PI / 2; w2.position.y = 1.28 * s; g.add(w2);
+  g.add(M(lath([[.08, 1.3], [.06, 1.6], [.2, 1.75], [.22, 1.8], [0, 1.82]]), st));
+  const sheet = new THREE.Mesh(new THREE.CylinderGeometry(.66 * s, .9 * s, .9 * s, 32, 1, true), fallMat); sheet.position.y = .85 * s; sheet.renderOrder = 2; g.add(sheet);
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(.24 * s, .2 * s, .5 * s, 16, 1, true), fallMat); top.position.y = 1.55 * s; top.renderOrder = 2; g.add(top);
+  return g;
+};
+B.fireplace = p => {
+  const g = new THREE.Group(), sm = stoneMat(), w = p.w;
+  g.add(M(boxM(w, 1.3, .9), sm, 0, .65, 0));
+  g.add(M(new THREE.BoxGeometry(w * .55, .75, .3), std('#1d1b19', { roughness: 1 }), 0, .6, .31, false));
+  g.add(M(boxM(w + .12, .1, 1.0), mat('capM', () => new THREE.MeshStandardMaterial({ map: TEX.trav, roughness: .8 })), 0, 1.35, 0));
+  g.add(M(boxM(w * .7, 1.2, .7), sm, 0, 2.0, -.05)); g.add(M(boxM(w * .45, 1.1, .5), sm, 0, 3.15, -.05)); g.add(M(boxM(w * .5, .08, .55), std('#bdb6aa'), 0, 3.74, -.05));
+  g.add(M(boxM(w + .6, .4, 1.0), sm, 0, .2, .05)); flames(g, 0, .3, .3, w * .35, 7, 21);
+  return g;
+};
+B.stonewall = p => {
+  const g = new THREE.Group();
+  g.add(M(boxM(p.w, p.h, .45), stoneMat(), 0, p.h / 2, 0));
+  g.add(M(boxM(p.w + .06, .07, .55), mat('capM', () => new THREE.MeshStandardMaterial({ map: TEX.trav, roughness: .8 })), 0, p.h + .035, 0));
+  return g;
+};
+B.playset = p => {
+  const g = new THREE.Group(), wd = woodM('#c09060'), pl = std('#2f8fd0', { roughness: .4 }), gr = std('#4caf50', { roughness: .5 }), yl = std('#f2c14e', { roughness: .5 });
+  [[-.7, -.7], [.7, -.7], [-.7, .7], [.7, .7]].forEach(([x, z]) => g.add(M(new THREE.BoxGeometry(.1, 2.6, .1), wd, x, 1.3, z)));
+  g.add(M(new THREE.BoxGeometry(1.5, .06, 1.5), wd, 0, 1.4, 0));
+  [-1, 1].forEach(s => { g.add(M(new THREE.BoxGeometry(1.5, .06, .06), wd, 0, 1.75, s * .72)); }); g.add(M(new THREE.BoxGeometry(.06, .06, 1.5), wd, -.72, 1.75, 0));
+  const roof = M(new THREE.ConeGeometry(1.2, .7, 4), gr, 0, 2.95, 0); roof.rotation.y = Math.PI / 4; g.add(roof);
+  const sl = new THREE.Mesh(new THREE.BoxGeometry(.55, .04, 2.6), pl); sl.position.set(.25, .75, 1.85); sl.rotation.x = .56; sl.castShadow = true; g.add(sl);
+  [-1, 1].forEach(s => { const rail = M(new THREE.BoxGeometry(.04, .12, 2.6), pl, .25 + s * .28, .82, 1.85); rail.rotation.x = .56; g.add(rail); });
+  for (let i = 0; i < 6; i++) g.add(M(new THREE.BoxGeometry(.5, .04, .1), wd, -.25, .2 + i * .22, -.75 - (i % 1)));
+  const bx = 2.4; [-.75, .75].forEach(z => { const a = M(new THREE.BoxGeometry(.09, 2.5, .09), wd, -bx, 1.15, z * 1.3); a.rotation.x = z > 0 ? -.25 : .25; g.add(a); }); g.add(M(new THREE.BoxGeometry(bx + .1, .1, .1), wd, -bx / 2 - .05, 2.35, 0));
+  [-1.15, -1.95].forEach((x, i) => { [-.2, .2].forEach(z => g.add(M(new THREE.CylinderGeometry(.008, .008, 1.85, 4), std('#888'), x, 1.43, z, false))); g.add(M(new THREE.BoxGeometry(.25, .04, .5), i ? yl : pl, x, .5, 0)); });
+  return g;
+};
+
 /* ---------------- Catalog ---------------- */
 const CUSH = [['#f4f1ea', 'Blanco'], ['#2f6f8f', 'Azul'], ['#d9a441', 'Mostaza'], ['#6b7b5b', 'Oliva'], ['#c25a43', 'Coral']];
 const TILES = [['#4fa9c6', 'Azul cielo'], ['#2fb3b0', 'Turquesa'], ['#2a5d9f', 'Azul profundo'], ['#9fb0b5', 'Gris perla'], ['#d9cba6', 'Arena'], ['#34474f', 'Pizarra']];
@@ -965,14 +1137,31 @@ const TYPES = {
   lamp: { label: 'Luminaria', fields: [] },
   pergola: { label: 'Pérgola', fields: [['w', 'Largo', 'num', 2, 10, .1], ['l', 'Ancho', 'num', 2, 8, .1], ['h', 'Altura', 'num', 2.2, 4, .05], ['color', 'Color', 'sw', [['#8a6a4a', 'Nogal'], ['#f2f0ea', 'Blanco'], ['#33363a', 'Grafito']]]] },
   wall: { label: 'Muro', fields: [['w', 'Largo', 'num', .5, 40, .1], ['h', 'Altura', 'num', .3, 3.5, .05], ['color', 'Acabado', 'sw', [['stucco', 'Aplanado'], ['#8f8a83', 'Piedra'], ['#3e4245', 'Grafito'], ['#b5734f', 'Ladrillo']]]] },
+  jets: { label: 'Chorros laminares', fields: [['n', 'Cantidad', 'num', 1, 6, 1], ['w', 'Alcance', 'num', 1, 4, .1]] },
+  scupper: { label: 'Bocas de agua', fields: [['n', 'Bocas', 'num', 1, 6, 1], ['h', 'Altura del muro', 'num', .5, 2.5, .05]] },
+  bubbler: { label: 'Burbujeador', fields: [] },
+  firebowl: { label: 'Tazón de fuego', fields: [['h', 'Altura del pedestal', 'num', .2, 1.5, .05], ['color', 'Acabado', 'sw', [['#7a746c', 'Concreto'], ['#b5734f', 'Terracota'], ['#3e4245', 'Grafito'], ['#d9d2c3', 'Cantera']]]] },
+  cypress: { label: 'Ciprés', fields: [['h', 'Altura', 'num', 1.5, 9, .1]] },
+  grass: { label: 'Pasto ornamental', fields: [['s', 'Tamaño', 'num', .4, 2, .05], ['color', 'Color', 'sw', [['#9aa25a', 'Verde paja'], ['#7d8f4a', 'Verde'], ['#a0645a', 'Púrpura'], ['#c9b77a', 'Dorado']]]] },
+  bird: { label: 'Ave del paraíso', fields: [['s', 'Tamaño', 'num', .6, 2.5, .05]] },
+  topiary: { label: 'Topiario', fields: [['shape', 'Forma', 'sel', [['ball', 'Esfera'], ['triple', 'Tres esferas'], ['cone', 'Cono']]], ['s', 'Tamaño', 'num', .6, 2, .05]] },
+  daybed: { label: 'Cama de sol', fields: [['color', 'Tela', 'sw', CUSH]] },
+  barset: { label: 'Barra con bancos', fields: [['w', 'Largo', 'num', 1.2, 5, .1], ['color', 'Asientos', 'sw', CUSH]] },
+  adirondack: { label: 'Silla Adirondack', fields: [['color', 'Color', 'sw', [['#f2f0ea', 'Blanco'], ['#2f6f8f', 'Azul'], ['#9a6a43', 'Madera'], ['#c25a43', 'Rojo'], ['#3e4245', 'Grafito']]]] },
+  swing: { label: 'Silla colgante', fields: [['color', 'Cojín', 'sw', CUSH]] },
+  gazebo: { label: 'Gazebo', fields: [['w', 'Diámetro', 'num', 2.5, 6, .1], ['color', 'Color', 'sw', [['#e8e2d6', 'Blanco'], ['#8a6a4a', 'Nogal'], ['#33363a', 'Grafito']]]] },
+  fountain: { label: 'Fuente', fields: [['s', 'Tamaño', 'num', .6, 2, .05], ['color', 'Acabado', 'sw', [['#d9d2c3', 'Cantera'], ['#8f8a83', 'Piedra'], ['#b5734f', 'Terracota']]]] },
+  fireplace: { label: 'Chimenea exterior', fields: [['w', 'Ancho', 'num', 1.4, 3.5, .1]] },
+  stonewall: { label: 'Muro de piedra', fields: [['w', 'Largo', 'num', .5, 30, .1], ['h', 'Altura', 'num', .3, 2.5, .05]] },
+  playset: { label: 'Juegos infantiles', fields: [] },
   house: { label: 'Casa', fields: [['w', 'Fachada', 'num', 6, 30, .5], ['l', 'Fondo', 'num', 5, 20, .5]] },
 };
 const CATALOG = [
-  ['Piscinas', [['Dibujar forma libre', 'draw', {}], ['Riñón', 'pool', { shape: 'free', smooth: true, pts: KIDNEY, w: 8, l: 4.4, d: 1.5, tile: '#2fb3b0', coping: 'trav', lights: 3 }], ['Rectangular', 'pool', { shape: 'rect', w: 8, l: 4, d: 1.5, tile: '#4fa9c6', coping: 'trav', lights: 3 }], ['Ovalada', 'pool', { shape: 'oval', w: 7, l: 3.8, d: 1.5, tile: '#2fb3b0', coping: 'trav', lights: 3 }], ['En L', 'pool', { shape: 'L', w: 9, l: 6, d: 1.6, tile: '#4fa9c6', coping: 'concrete', lights: 4 }], ['Spa / jacuzzi', 'pool', { shape: 'oval', w: 2.4, l: 2.4, d: .9, tile: '#2a5d9f', coping: 'dark', lights: 2 }], ['Cascada', 'waterfall', { w: 1.2, h: .8 }], ['Tobogán', 'slide', { color: '#2f8fd0' }]]],
+  ['Piscinas', [['Dibujar forma libre', 'draw', {}], ['Riñón', 'pool', { shape: 'free', smooth: true, pts: KIDNEY, w: 8, l: 4.4, d: 1.5, tile: '#2fb3b0', coping: 'trav', lights: 3 }], ['Rectangular', 'pool', { shape: 'rect', w: 8, l: 4, d: 1.5, tile: '#4fa9c6', coping: 'trav', lights: 3 }], ['Ovalada', 'pool', { shape: 'oval', w: 7, l: 3.8, d: 1.5, tile: '#2fb3b0', coping: 'trav', lights: 3 }], ['En L', 'pool', { shape: 'L', w: 9, l: 6, d: 1.6, tile: '#4fa9c6', coping: 'concrete', lights: 4 }], ['Spa / jacuzzi', 'pool', { shape: 'oval', w: 2.4, l: 2.4, d: .9, tile: '#2a5d9f', coping: 'dark', lights: 2 }], ['Chorros laminares', 'jets', { n: 2, w: 2.2 }], ['Bocas de agua', 'scupper', { n: 3, h: 1.2 }], ['Burbujeador', 'bubbler', {}], ['Tazón de fuego', 'firebowl', { h: .7, color: '#7a746c' }], ['Cascada', 'waterfall', { w: 1.2, h: .8 }], ['Tobogán', 'slide', { color: '#2f8fd0' }]]],
   ['Pisos', [['Madera', 'deck', { mat: 'wood', w: 6, l: 4 }], ['Travertino', 'deck', { mat: 'trav', w: 12, l: 7 }], ['Concreto', 'deck', { mat: 'concrete', w: 6, l: 4 }], ['Adoquín', 'deck', { mat: 'pavers', w: 2, l: 8 }]]],
-  ['Plantas', [['Palmera', 'palm', { h: 6 }], ['Árbol', 'tree', { h: 6 }], ['Arbusto', 'bush', { s: 1 }], ['Arbusto con flor', 'bush', { s: 1, flower: '#e0577a' }], ['Jardinera', 'planter', { w: 2.4 }], ['Seto', 'hedge', { w: 4, h: 1.2 }], ['Agave', 'agave', { s: 1 }], ['Cactus', 'cactus', { h: 2.2 }], ['Maceta', 'pot', { s: 1, color: '#b5734f' }], ['Rocas', 'rocks', { s: 1.2 }]]],
-  ['Muebles', [['Camastro', 'lounger', { color: '#f4f1ea' }], ['Sombrilla', 'umbrella', { size: 2.6, color: '#f4f1ea' }], ['Comedor', 'dining', { color: '#2f6f8f' }], ['Sofá', 'sofa', { color: '#f4f1ea' }], ['Fogatero', 'firepit', {}], ['Luminaria', 'lamp', {}], ['Asador', 'grill', {}], ['Cocina exterior', 'kitchen', { w: 3 }], ['Hamaca', 'hammock', { color: '#d9a441' }], ['Regadera', 'shower', {}]]],
-  ['Estructuras', [['Pérgola', 'pergola', { w: 4, l: 3, h: 2.7, color: '#8a6a4a' }], ['Muro', 'wall', { w: 6, h: 1.8, color: 'stucco' }], ['Palapa', 'palapa', { w: 4.5 }], ['Vela de sombra', 'sail', { w: 5, color: '#f4f1ea' }], ['Reja metálica', 'fence', { w: 6, h: 1.4, color: '#2b2d30' }], ['Casa', 'house', { w: 14, l: 8 }]]],
+  ['Plantas', [['Palmera', 'palm', { h: 6 }], ['Árbol', 'tree', { h: 6 }], ['Arbusto', 'bush', { s: 1 }], ['Arbusto con flor', 'bush', { s: 1, flower: '#e0577a' }], ['Jardinera', 'planter', { w: 2.4 }], ['Seto', 'hedge', { w: 4, h: 1.2 }], ['Agave', 'agave', { s: 1 }], ['Cactus', 'cactus', { h: 2.2 }], ['Maceta', 'pot', { s: 1, color: '#b5734f' }], ['Rocas', 'rocks', { s: 1.2 }], ['Ciprés', 'cypress', { h: 4 }], ['Pasto ornamental', 'grass', { s: 1, color: '#9aa25a' }], ['Ave del paraíso', 'bird', { s: 1.3 }], ['Topiario', 'topiary', { shape: 'ball', s: 1 }]]],
+  ['Muebles', [['Camastro', 'lounger', { color: '#f4f1ea' }], ['Sombrilla', 'umbrella', { size: 2.6, color: '#f4f1ea' }], ['Comedor', 'dining', { color: '#2f6f8f' }], ['Sofá', 'sofa', { color: '#f4f1ea' }], ['Fogatero', 'firepit', {}], ['Luminaria', 'lamp', {}], ['Asador', 'grill', {}], ['Cocina exterior', 'kitchen', { w: 3 }], ['Hamaca', 'hammock', { color: '#d9a441' }], ['Regadera', 'shower', {}], ['Cama de sol', 'daybed', { color: '#f4f1ea' }], ['Barra con bancos', 'barset', { w: 2.4, color: '#2f6f8f' }], ['Silla Adirondack', 'adirondack', { color: '#f2f0ea' }], ['Silla colgante', 'swing', { color: '#f4f1ea' }]]],
+  ['Estructuras', [['Pérgola', 'pergola', { w: 4, l: 3, h: 2.7, color: '#8a6a4a' }], ['Muro', 'wall', { w: 6, h: 1.8, color: 'stucco' }], ['Palapa', 'palapa', { w: 4.5 }], ['Vela de sombra', 'sail', { w: 5, color: '#f4f1ea' }], ['Reja metálica', 'fence', { w: 6, h: 1.4, color: '#2b2d30' }], ['Gazebo', 'gazebo', { w: 3.6, color: '#e8e2d6' }], ['Fuente', 'fountain', { s: 1, color: '#d9d2c3' }], ['Chimenea exterior', 'fireplace', { w: 2 }], ['Muro de piedra', 'stonewall', { w: 6, h: .8 }], ['Juegos infantiles', 'playset', {}], ['Casa', 'house', { w: 14, l: 8 }]]],
 ];
 
 /* ---------------- State ---------------- */
@@ -1328,13 +1517,13 @@ function shotModal() {
 
 /* ---------------- Quote (cotización) ---------------- */
 const QKEY = 'aquaforma.quote.v1';
-const DEF_PRICES_US = { excav: 65, shell: 38, tile: 30, coping: 48, equip: 9500, equipSpa: 14000, water: 12, poolLight: 650, waterfall: 3800, slide: 11000, deck_wood: 42, deck_trav: 30, deck_concrete: 12, deck_pavers: 20, palm: 650, tree: 450, bush: 60, planter: 450, hedge: 55, lounger: 900, umbrella: 600, dining: 2800, sofa: 2400, firepit: 1600, lamp: 250, pergola: 75, wall: 40, agave: 120, cactus: 250, pot: 180, rocks: 400, grill: 2200, kitchen: 1200, hammock: 700, shower: 1500, fence: 60, sail: 1800, palapa: 85 };
+const DEF_PRICES_US = { jets: 1400, scupper: 900, bubbler: 750, firebowl: 1800, cypress: 180, grass: 45, bird: 120, topiary: 350, daybed: 3800, barset: 2600, adirondack: 380, swing: 900, gazebo: 14000, fountain: 3500, fireplace: 9500, stonewall: 55, playset: 3200, excav: 65, shell: 38, tile: 30, coping: 48, equip: 9500, equipSpa: 14000, water: 12, poolLight: 650, waterfall: 3800, slide: 11000, deck_wood: 42, deck_trav: 30, deck_concrete: 12, deck_pavers: 20, palm: 650, tree: 450, bush: 60, planter: 450, hedge: 55, lounger: 900, umbrella: 600, dining: 2800, sofa: 2400, firepit: 1600, lamp: 250, pergola: 75, wall: 40, agave: 120, cactus: 250, pot: 180, rocks: 400, grill: 2200, kitchen: 1200, hammock: 700, shower: 1500, fence: 60, sail: 1800, palapa: 85 };
 const NOTES_US = 'Prices include labor. 50% deposit to start construction, balance due at completion. Estimated build time: 6 to 8 weeks. Quantities are approximate and will be confirmed at the site visit. Permits, engineering and HOA fees are not included unless noted.';
-const DEF_PRICES = { excav: 450, shell: 2200, tile: 750, coping: 950, equip: 38000, equipSpa: 52000, water: 45, poolLight: 3200, waterfall: 18500, deck_wood: 1650, deck_trav: 1250, deck_concrete: 480, deck_pavers: 690, palm: 5200, tree: 3200, bush: 650, planter: 2800, hedge: 780, lounger: 7800, umbrella: 4600, dining: 19500, sofa: 16500, firepit: 9800, lamp: 1900, pergola: 3600, wall: 1150, slide: 45000, agave: 900, cactus: 1500, pot: 1200, rocks: 2500, grill: 14000, kitchen: 22000, hammock: 6500, shower: 7500, fence: 1800, sail: 9000, palapa: 2800 };
+const DEF_PRICES = { jets: 9500, scupper: 6500, bubbler: 5200, firebowl: 11000, cypress: 1200, grass: 350, bird: 850, topiary: 2400, daybed: 26000, barset: 18000, adirondack: 2600, swing: 6200, gazebo: 85000, fountain: 22000, fireplace: 58000, stonewall: 1400, playset: 21000, excav: 450, shell: 2200, tile: 750, coping: 950, equip: 38000, equipSpa: 52000, water: 45, poolLight: 3200, waterfall: 18500, deck_wood: 1650, deck_trav: 1250, deck_concrete: 480, deck_pavers: 690, palm: 5200, tree: 3200, bush: 650, planter: 2800, hedge: 780, lounger: 7800, umbrella: 4600, dining: 19500, sofa: 16500, firepit: 9800, lamp: 1900, pergola: 3600, wall: 1150, slide: 45000, agave: 900, cactus: 1500, pot: 1200, rocks: 2500, grill: 14000, kitchen: 22000, hammock: 6500, shower: 7500, fence: 1800, sail: 9000, palapa: 2800 };
 const PRICE_FIELDS = [
   ['Piscina y spa', [['excav', 'Excavación y retiro', 'm³'], ['shell', 'Vaso de concreto armado', 'm²'], ['tile', 'Azulejo instalado', 'm²'], ['coping', 'Borde / coronamiento', 'ml'], ['equip', 'Equipo de filtración', 'lote'], ['equipSpa', 'Equipo de spa', 'lote'], ['water', 'Llenado de agua', 'm³'], ['poolLight', 'Luz subacuática LED', 'pza'], ['waterfall', 'Cascada', 'pza'], ['slide', 'Tobogán', 'pza']]],
   ['Pisos', [['deck_wood', 'Madera', 'm²'], ['deck_trav', 'Travertino', 'm²'], ['deck_concrete', 'Concreto', 'm²'], ['deck_pavers', 'Adoquín', 'm²']]],
-  ['Jardín y mobiliario', [['palm', 'Palmera', 'pza'], ['tree', 'Árbol', 'pza'], ['bush', 'Arbusto', 'pza'], ['planter', 'Jardinera', 'pza'], ['hedge', 'Seto', 'ml'], ['lounger', 'Camastro', 'pza'], ['umbrella', 'Sombrilla', 'pza'], ['dining', 'Comedor exterior', 'juego'], ['sofa', 'Sofá exterior', 'pza'], ['firepit', 'Fogatero', 'pza'], ['lamp', 'Luminaria', 'pza'], ['pergola', 'Pérgola', 'm²'], ['wall', 'Muro', 'm²'], ['agave', 'Agave', 'pza'], ['cactus', 'Cactus', 'pza'], ['pot', 'Maceta', 'pza'], ['rocks', 'Rocas decorativas', 'lote'], ['grill', 'Asador', 'pza'], ['kitchen', 'Cocina exterior', 'ml'], ['hammock', 'Hamaca', 'pza'], ['shower', 'Regadera exterior', 'pza'], ['fence', 'Reja metálica', 'ml'], ['sail', 'Vela de sombra', 'pza'], ['palapa', 'Palapa', 'm²']]]
+  ['Jardín y mobiliario', [['palm', 'Palmera', 'pza'], ['tree', 'Árbol', 'pza'], ['bush', 'Arbusto', 'pza'], ['planter', 'Jardinera', 'pza'], ['hedge', 'Seto', 'ml'], ['lounger', 'Camastro', 'pza'], ['umbrella', 'Sombrilla', 'pza'], ['dining', 'Comedor exterior', 'juego'], ['sofa', 'Sofá exterior', 'pza'], ['firepit', 'Fogatero', 'pza'], ['lamp', 'Luminaria', 'pza'], ['pergola', 'Pérgola', 'm²'], ['wall', 'Muro', 'm²'], ['agave', 'Agave', 'pza'], ['cactus', 'Cactus', 'pza'], ['pot', 'Maceta', 'pza'], ['rocks', 'Rocas decorativas', 'lote'], ['grill', 'Asador', 'pza'], ['kitchen', 'Cocina exterior', 'ml'], ['hammock', 'Hamaca', 'pza'], ['shower', 'Regadera exterior', 'pza'], ['fence', 'Reja metálica', 'ml'], ['sail', 'Vela de sombra', 'pza'], ['palapa', 'Palapa', 'm²'], ['jets', 'Chorros laminares', 'pza'], ['scupper', 'Bocas de agua', 'pza'], ['bubbler', 'Burbujeador', 'pza'], ['firebowl', 'Tazón de fuego', 'pza'], ['cypress', 'Ciprés', 'pza'], ['grass', 'Pasto ornamental', 'pza'], ['bird', 'Ave del paraíso', 'pza'], ['topiary', 'Topiario', 'pza'], ['daybed', 'Cama de sol', 'pza'], ['barset', 'Barra con bancos', 'juego'], ['adirondack', 'Silla Adirondack', 'pza'], ['swing', 'Silla colgante', 'pza'], ['gazebo', 'Gazebo', 'pza'], ['fountain', 'Fuente', 'pza'], ['fireplace', 'Chimenea exterior', 'pza'], ['stonewall', 'Muro de piedra', 'm²'], ['playset', 'Juegos infantiles', 'juego']]]
 ];
 function readQ() { let q = {}; try { q = JSON.parse(localStorage.getItem(QKEY) || '{}'); } catch (e) { }
   return { company: 'Tu Empresa de Piscinas', phone: '', email: '', logo: '', iva: 16, currency: 'MXN', validity: 15, notes: 'Precios con mano de obra incluida. Anticipo del 50 % para iniciar la obra y 50 % contra entrega. Tiempo estimado de construcción: 6 a 8 semanas. Los volúmenes son aproximados y se confirman en la visita técnica.', tax: 7.5, notesUS: NOTES_US, ...q, prices: { ...DEF_PRICES, ...(q.prices || {}) }, pricesUS: { ...DEF_PRICES_US, ...(q.pricesUS || {}) } }; }
@@ -1350,7 +1539,7 @@ const UFAC = { m3: 1.30795, m3w: .264172, m2: 10.7639, ml: 3.28084 };
 const unitLabel = u => UNIT[region][u] || u;
 const conv = (q, u) => US() ? q * (UFAC[u] || 1) : q;
 const curPrices = () => US() ? Q.pricesUS : Q.prices;
-const EN_LABEL = { palm: 'Palm tree', tree: 'Shade tree', bush: 'Shrub', planter: 'Planter box', hedge: 'Hedge', lounger: 'Chaise lounge', umbrella: 'Patio umbrella', dining: 'Outdoor dining set', sofa: 'Outdoor sofa', firepit: 'Fire pit', lamp: 'Path light', pergola: 'Pergola', wall: 'Garden wall', agave: 'Agave', cactus: 'Cactus', pot: 'Planter pot', rocks: 'Decorative boulders', grill: 'Grill', kitchen: 'Outdoor kitchen', hammock: 'Hammock', shower: 'Outdoor shower', fence: 'Metal fence', sail: 'Shade sail', palapa: 'Palapa', waterfall: 'Waterfall feature', slide: 'Water slide' };
+const EN_LABEL = { jets: 'Laminar deck jet', scupper: 'Scupper wall', bubbler: 'Bubbler', firebowl: 'Fire bowl', cypress: 'Italian cypress', grass: 'Ornamental grass', bird: 'Bird of paradise', topiary: 'Topiary', daybed: 'Canopy daybed', barset: 'Outdoor bar with stools', adirondack: 'Adirondack chair', swing: 'Hanging egg chair', gazebo: 'Gazebo', fountain: 'Tiered fountain', fireplace: 'Outdoor fireplace', stonewall: 'Stacked stone wall', playset: 'Playset', palm: 'Palm tree', tree: 'Shade tree', bush: 'Shrub', planter: 'Planter box', hedge: 'Hedge', lounger: 'Chaise lounge', umbrella: 'Patio umbrella', dining: 'Outdoor dining set', sofa: 'Outdoor sofa', firepit: 'Fire pit', lamp: 'Path light', pergola: 'Pergola', wall: 'Garden wall', agave: 'Agave', cactus: 'Cactus', pot: 'Planter pot', rocks: 'Decorative boulders', grill: 'Grill', kitchen: 'Outdoor kitchen', hammock: 'Hammock', shower: 'Outdoor shower', fence: 'Metal fence', sail: 'Shade sail', palapa: 'Palapa', waterfall: 'Waterfall feature', slide: 'Water slide' };
 const SHAPE_EN = { rect: 'Rectangular', oval: 'Oval', L: 'L-shaped', free: 'Freeform' }, COP_EN = { trav: 'travertine', concrete: 'concrete', dark: 'dark stone' }, SURF_EN = { wood: 'wood', trav: 'travertine', concrete: 'concrete', pavers: 'paver' };
 const dimTxt = (w, l) => US() ? `${fmtLen(w)} × ${fmtLen(l)}` : `${fmtNum(w)} × ${fmtNum(l)} m`;
 function quoteLines() {
@@ -1371,8 +1560,8 @@ function quoteLines() {
   const dk = {}; items.filter(i => i.type === 'deck').forEach(i => { dk[i.p.mat] = (dk[i.p.mat] || 0) + i.p.w * i.p.l; });
   const dr = Object.entries(dk).map(([m, a]) => row(`Piso de ${SURF_N[m]} (incluye 10 % de merma)`, `${SURF_EN[m].replace(/^./, c => c.toUpperCase())} decking (includes 10% waste)`, a * 1.1, 'm2', P['deck_' + m]));
   if (dr.length) secs.push({ title: L('Pisos y terraza', 'Decking and hardscape'), rows: dr });
-  const ot = {}; items.forEach(i => { if (['pool', 'deck', 'house'].includes(i.type)) return; let q = 1; if (i.type === 'hedge') q = i.p.w; if (i.type === 'wall') q = i.p.w * i.p.h; if (i.type === 'pergola') q = i.p.w * i.p.l; if (i.type === 'kitchen' || i.type === 'fence') q = i.p.w; if (i.type === 'palapa') q = i.p.w * i.p.w; ot[i.type] = (ot[i.type] || 0) + q; });
-  const un = { hedge: 'ml', wall: 'm2', pergola: 'm2', dining: 'set', kitchen: 'ml', fence: 'ml', palapa: 'm2', rocks: 'lot' };
+  const ot = {}; items.forEach(i => { if (['pool', 'deck', 'house'].includes(i.type)) return; let q = 1; if (i.type === 'hedge') q = i.p.w; if (i.type === 'wall') q = i.p.w * i.p.h; if (i.type === 'pergola') q = i.p.w * i.p.l; if (i.type === 'kitchen' || i.type === 'fence') q = i.p.w; if (i.type === 'palapa') q = i.p.w * i.p.w; if (i.type === 'stonewall') q = i.p.w * i.p.h; if (i.type === 'jets') q = Math.round(i.p.n || 1); ot[i.type] = (ot[i.type] || 0) + q; });
+  const un = { hedge: 'ml', wall: 'm2', pergola: 'm2', dining: 'set', kitchen: 'ml', fence: 'ml', palapa: 'm2', rocks: 'lot', stonewall: 'm2', barset: 'set', playset: 'set' };
   const orr = Object.entries(ot).map(([t, q]) => row(TYPES[t].label, EN_LABEL[t] || TYPES[t].label, q, un[t] || 'pz', P[t]));
   if (orr.length) secs.push({ title: L('Jardín, mobiliario y estructuras', 'Landscape, furniture and structures'), rows: orr });
   return secs;
@@ -1629,6 +1818,9 @@ function dimSize(it) {
     case 'kitchen': return [p.w, 0];
     case 'fence': return [p.w, 0];
     case 'palapa': return [p.w, p.w];
+    case 'gazebo': return [p.w, p.w];
+    case 'stonewall': return [p.w, 0];
+    case 'barset': return [p.w, 0];
     default: return null;
   }
 }

@@ -502,6 +502,7 @@ function setTime(h) {
   waterMat.emissive = new THREE.Color(0x0a5f7a).multiplyScalar(nightF * .8);
   caustMat.opacity = .3 * dayF + .08; updateEnv();
   glowMats.forEach(m => { m.emissiveIntensity = m.userData.base * (.35 + nightF * 1.4); });
+  if (typeof winMats !== 'undefined') winMats.forEach(m => { m.emissiveIntensity = nightF * .9; });
   const hh = Math.floor(h), mm = Math.round((h - hh) * 60);
   $('#timeOut').textContent = String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
 }
@@ -905,16 +906,6 @@ B.hedge = p => {
   return g;
 };
 const ROOF_TEX = canvasTex(256, (g, s) => { const r = rng(71); g.fillStyle = '#55595e'; g.fillRect(0, 0, s, s); for (let i = 0; i < 8; i++) { const x = i * s / 8; g.fillStyle = '#3c3f43'; g.fillRect(x, 0, 3, s); g.fillStyle = '#6b7075'; g.fillRect(x + 3, 0, 2, s); } for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(${r() > .5 ? '255,255,255' : '0,0,0'},.04)`; g.fillRect(r() * s, r() * s, 2, 6); } }, .5);
-B.house = p => {
-  const g = new THREE.Group(), wallM = stuccoMat(), roofM = mat('roofM', () => new THREE.MeshStandardMaterial({ map: ROOF_TEX, normalMap: normalFrom(ROOF_TEX, 5), roughness: .75 })), glass = std('#33505c', { roughness: .1, metalness: .4 });
-  const h = 3.2; g.add(M(new THREE.BoxGeometry(p.w, h, p.l), wallM, 0, h / 2, 0));
-  const tri = new THREE.Shape(); tri.moveTo(-p.l / 2 - .5, 0); tri.lineTo(p.l / 2 + .5, 0); tri.lineTo(0, 1.6); tri.closePath();
-  const roof = M(new THREE.ExtrudeGeometry(tri, { depth: p.w + 1, bevelEnabled: false }), roofM, -(p.w + 1) / 2, h, 0); roof.rotation.y = Math.PI / 2; g.add(roof);
-  const n = Math.max(1, Math.floor(p.w / 3.2));
-  for (let i = 0; i < n; i++) { const x = -p.w / 2 + (i + .5) * p.w / n; const isDoor = i === Math.floor(n / 2); const ww = isDoor ? 2.4 : 1.5, hh = isDoor ? 2.4 : 1.3; g.add(M(new THREE.BoxGeometry(ww, hh, .06), glass, x, isDoor ? hh / 2 + .05 : 1.7, p.l / 2 + .02, false)); g.add(M(new THREE.BoxGeometry(ww + .14, .08, .14), std('#f8f8f8'), x, (isDoor ? hh + .05 : 1.7 + hh / 2) + .04, p.l / 2 + .04, false)); }
-  g.add(M(new THREE.BoxGeometry(p.w + .2, .14, p.l + .2), std('#d9d4c8'), 0, .07, 0));
-  return g;
-};
 B.firepit = p => {
   const g = new THREE.Group();
   g.add(M(new THREE.CylinderGeometry(.75, .8, .45, 24, 1, true), std('#6f6a64', { side: THREE.DoubleSide }), 0, .22, 0));
@@ -1104,6 +1095,142 @@ B.playset = p => {
   return g;
 };
 
+B.house = p => {
+  // fill in defaults so older projects get editable doors and windows
+  const D = { fw: Math.max(1, Math.floor(p.w / 3.2)) - 1 || 1, ww: 1.5, wh: 1.3, door: 'slide', dw: 2.4, dpos: 'center', sw: 1, bw: 2, frame: '#f8f8f8', wall: 'stucco' };
+  Object.keys(D).forEach(k => { if (p[k] === undefined) p[k] = D[k]; });
+  const g = new THREE.Group(), h = 3.2, roofM = mat('roofM', () => new THREE.MeshStandardMaterial({ map: ROOF_TEX, normalMap: normalFrom(ROOF_TEX, 5), roughness: .75 }));
+  const wallM = p.wall === 'stucco' ? stuccoMat() : mat('stuccoC' + p.wall, () => new THREE.MeshStandardMaterial({ color: p.wall, map: TEX.stucco, normalMap: normalFrom(TEX.stucco, 4), normalScale: new THREE.Vector2(.6, .6), roughness: .95 }));
+  g.add(M(new THREE.BoxGeometry(p.w, h, p.l), wallM, 0, h / 2, 0));
+  const tri = new THREE.Shape(); tri.moveTo(-p.l / 2 - .5, 0); tri.lineTo(p.l / 2 + .5, 0); tri.lineTo(0, 1.6); tri.closePath();
+  const roof = M(new THREE.ExtrudeGeometry(tri, { depth: p.w + 1, bevelEnabled: false }), roofM, -(p.w + 1) / 2, h, 0); roof.rotation.y = Math.PI / 2; g.add(roof);
+  g.add(M(new THREE.BoxGeometry(p.w + .2, .14, p.l + .2), std('#d9d4c8'), 0, .07, 0));
+  const fm = p.frame === 'wood' ? woodM('#8a5a36') : std(p.frame, { roughness: .45, metalness: p.frame === '#2b2d30' ? .4 : .1 });
+  // places a group on a facade: side 0 front (+z), 1 right (+x), 2 back, 3 left
+  const face = (side, x, y, el) => { const a = [0, Math.PI / 2, Math.PI, -Math.PI / 2][side], d = (side % 2 ? p.w : p.l) / 2 + .01; el.position.set(Math.sin(a) * d + Math.cos(a) * x, y, Math.cos(a) * d - Math.sin(a) * x); el.rotation.y = a; g.add(el); };
+  const segs = side => side % 2 ? p.l : p.w;
+  // slots along the front: windows plus the door in one of them
+  const nF = Math.round(p.fw) + (p.door === 'none' ? 0 : 1), slotW = p.w / Math.max(1, nF);
+  const dSlot = p.door === 'none' ? -1 : p.dpos === 'left' ? 0 : p.dpos === 'right' ? nF - 1 : Math.floor((nF - 1) / 2);
+  for (let i = 0; i < nF; i++) { const x = -p.w / 2 + (i + .5) * slotW; face(0, x, 0, i === dSlot ? doorEl(p.door, Math.min(p.dw, slotW - .3), fm) : winEl(Math.min(p.ww, slotW - .4), p.wh, fm)); }
+  [[1, p.sw], [3, p.sw], [2, p.bw]].forEach(([side, n]) => { n = Math.round(n); const L = segs(side); for (let i = 0; i < n; i++) face(side, -L / 2 + (i + .5) * L / n, 0, winEl(Math.min(p.ww, L / n - .4), p.wh, fm)); });
+  return g;
+};
+const winMats = new Set();
+const glassM = () => mat('glassHouse', () => { const m = new THREE.MeshPhongMaterial({ color: 0x2c4550, specular: 0xffffff, shininess: 90, envMap: envCube, reflectivity: .45, combine: THREE.MixOperation, emissive: 0xffc977, emissiveIntensity: 0 }); winMats.add(m); return m; });
+function frameRect(g, w, h, y0, fm, t = .07, dep = .1) {
+  g.add(M(new THREE.BoxGeometry(w, t, dep), fm, 0, y0 + t / 2, dep / 2, false)); g.add(M(new THREE.BoxGeometry(w, t, dep), fm, 0, y0 + h - t / 2, dep / 2, false));
+  [-1, 1].forEach(s => g.add(M(new THREE.BoxGeometry(t, h, dep), fm, s * (w / 2 - t / 2), y0 + h / 2, dep / 2, false)));
+}
+function winEl(w, h, fm) {
+  const g = new THREE.Group(), y0 = Math.max(.6, 2.35 - h);
+  g.add(M(new THREE.BoxGeometry(w - .08, h - .08, .02), glassM(), 0, y0 + h / 2, .03, false)); frameRect(g, w, h, y0, fm);
+  if (w > 1.1) g.add(M(new THREE.BoxGeometry(.05, h, .08), fm, 0, y0 + h / 2, .05, false));
+  g.add(M(new THREE.BoxGeometry(w + .14, .05, .18), std('#e4dfd4'), 0, y0 - .02, .08, false));
+  return g;
+}
+function doorEl(kind, w, fm) {
+  const g = new THREE.Group(), h = 2.3;
+  if (kind === 'single') {
+    const dw = Math.min(w, 1); g.add(M(new THREE.BoxGeometry(dw - .08, h - .06, .05), woodM('#7a4f2e'), 0, h / 2, .03, false)); frameRect(g, dw, h, 0, fm);
+    for (let i = 0; i < 3; i++) g.add(M(new THREE.BoxGeometry(dw - .3, .55, .02), woodM('#6a4326'), 0, .4 + i * .65, .065, false));
+    g.add(M(new THREE.CylinderGeometry(.02, .02, .14, 8), steel(), dw / 2 - .12, 1.05, .09, false));
+    if (w > 1.5) [-1, 1].forEach(s => { const sl = new THREE.Group(); sl.position.x = s * (dw / 2 + .22); sl.add(M(new THREE.BoxGeometry(.3, h - .1, .02), glassM(), 0, h / 2, .03, false)); frameRect(sl, .34, h, 0, fm); g.add(sl); });
+  } else {
+    g.add(M(new THREE.BoxGeometry(w - .08, h - .08, .02), glassM(), 0, h / 2, .03, false)); frameRect(g, w, h, 0, fm);
+    g.add(M(new THREE.BoxGeometry(.06, h, .1), fm, 0, h / 2, .06, false));
+    if (kind === 'french') { [-1, 1].forEach(s => { for (let k = 1; k < 3; k++) g.add(M(new THREE.BoxGeometry(.03, h, .06), fm, s * w / 2 * k / 3, h / 2, .05, false)); }); for (let k = 1; k < 4; k++) g.add(M(new THREE.BoxGeometry(w, .03, .06), fm, 0, h * k / 4, .05, false)); [-1, 1].forEach(s => g.add(M(new THREE.BoxGeometry(.02, .2, .04), std('#c9b27a', { metalness: .7, roughness: .3 }), s * .08, 1.05, .1, false))); }
+    else g.add(M(new THREE.BoxGeometry(.03, .35, .04), steel(), w * .05, 1.05, .12, false));
+  }
+  g.add(M(new THREE.BoxGeometry(w + .3, .04, .4), std('#d9d4c8'), 0, .02, .2, false));
+  return g;
+}
+
+/* ---------- People, pets and tabletop ---------- */
+// limb hanging down from a joint at the group's origin
+const limb = (len, r0, r1, m) => { const gg = new THREE.Group(); gg.add(M(new THREE.CylinderGeometry(r0, r1, len, 10), m, 0, -len / 2, 0)); gg.add(M(new THREE.SphereGeometry(r1 * 1.02, 10, 8), m, 0, -len, 0, false)); return gg; };
+B.person = p => {
+  const g = new THREE.Group(), kind = p.kind || 'man', pose = p.pose || 'stand', child = kind === 'child', S = child ? .62 : (kind === 'woman' ? .95 : 1);
+  const skin = std(p.skin || '#c99a76', { roughness: .65 }), shirt = fabric(p.shirt || '#2f6f8f'), pants = fabric(kind === 'woman' ? (p.shirt || '#c25a43') : '#3b4250'), hairM = std(p.hair || '#2a1d14', { roughness: .8 }), shoe = std('#2b2b2b', { roughness: .6 });
+  const b = new THREE.Group(); b.scale.setScalar(S); g.add(b);
+  const sit = pose === 'sit', hipY = sit ? .46 / S : .92, leg = .9;
+  // torso and pelvis
+  const torso = new THREE.LatheGeometry([[0, 0], [.15, 0], [.17, .1], [.155, .25], [.18, .42], [.2, .5], [.12, .56], [0, .58]].map(([x, y]) => new THREE.Vector2(x, y)), 18); torso.scale(1, 1, .62);
+  b.add(M(torso, shirt, 0, hipY, 0));
+  b.add(M(new THREE.CylinderGeometry(.05, .055, .09, 10), skin, 0, hipY + .6, 0));
+  const head = M(new THREE.SphereGeometry(.11, 18, 14), skin, 0, hipY + .73, .01); head.scale.set(.9, 1.1, 1); b.add(head);
+  const hair = M(new THREE.SphereGeometry(.118, 18, 12, 0, Math.PI * 2, 0, kind === 'woman' ? Math.PI * .62 : Math.PI * .5), hairM, 0, hipY + .75, -.005); hair.scale.set(.92, 1.08, 1.02); b.add(hair);
+  if (kind === 'woman') { const tail = M(new THREE.CylinderGeometry(.07, .035, .3, 10), hairM, 0, hipY + .6, -.1); tail.rotation.x = .2; b.add(tail); }
+  b.add(M(new THREE.SphereGeometry(.03, 8, 6), skin, 0, hipY + .72, .11, false));
+  // legs
+  const walk = pose === 'walk' ? .35 : 0;
+  [-1, 1].forEach(s => {
+    const hip = new THREE.Group(); hip.position.set(s * .085, hipY + .02, 0); b.add(hip);
+    const thigh = limb(leg * .5, .075, .058, kind === 'woman' && !sit ? skin : pants); hip.add(thigh);
+    const knee = new THREE.Group(); knee.position.y = -leg * .5; thigh.add(knee); const shin = limb(leg * .47, .056, .042, kind === 'woman' ? skin : pants); knee.add(shin);
+    const foot = M(new THREE.BoxGeometry(.09, .06, .22), shoe, 0, -leg * .47 - .02, .05, false); knee.add(foot);
+    if (sit) { thigh.rotation.x = -Math.PI / 2; knee.rotation.x = Math.PI / 2; } else thigh.rotation.x = s * walk, knee.rotation.x = s > 0 ? .25 * (walk ? 1 : 0) : 0;
+  });
+  if (kind === 'woman' && !sit) b.add(M(new THREE.CylinderGeometry(.17, .25, .42, 18, 1, true), mat('skirtD' + (p.shirt || ''), () => new THREE.MeshStandardMaterial({ color: p.shirt || '#c25a43', map: FABRIC_TEX, side: THREE.DoubleSide, roughness: .95 })), 0, hipY - .17, 0));
+  if (kind === 'woman' && sit) b.add(M(new THREE.BoxGeometry(.36, .1, .45), pants, 0, hipY, .17));
+  // arms
+  [-1, 1].forEach(s => {
+    const sh = new THREE.Group(); sh.position.set(s * .21, hipY + .52, 0); b.add(sh);
+    const up = limb(.3, .05, .042, shirt); sh.add(up); const el = new THREE.Group(); el.position.y = -.3; up.add(el); const fo = limb(.27, .04, .032, skin); el.add(fo);
+    fo.add(M(new THREE.SphereGeometry(.045, 8, 6), skin, 0, -.3, 0, false));
+    up.rotation.z = s * .12; up.rotation.x = pose === 'walk' ? -s * .35 : 0; if (sit) { up.rotation.x = -.35; el.rotation.x = -.9; }
+    if (pose === 'wave' && s > 0) { up.rotation.z = 2.5; el.rotation.z = .5; }
+  });
+  return g;
+};
+B.dog = p => {
+  const g = new THREE.Group(), s = p.s || 1, c = std(p.color || '#c8954f', { roughness: .9 }), dark = std(shade(p.color || '#c8954f', -.15), { roughness: .9 }), lie = p.pose === 'lie';
+  const b = new THREE.Group(); b.scale.setScalar(s); g.add(b); const by = lie ? .2 : .42;
+  const body = M(new THREE.SphereGeometry(.2, 18, 12), c, 0, by, 0); body.scale.set(1, .95, 1.9); b.add(body);
+  const chest = M(new THREE.SphereGeometry(.17, 14, 10), c, 0, by + .05, .24); b.add(chest);
+  const neck = M(new THREE.CylinderGeometry(.09, .12, .22, 10), c, 0, by + .17, .33); neck.rotation.x = .6; b.add(neck);
+  const hd = new THREE.Group(); hd.position.set(0, by + .3, .42); b.add(hd);
+  hd.add(M(new THREE.SphereGeometry(.12, 16, 12), c)); const snout = M(new THREE.CylinderGeometry(.055, .07, .16, 10), c, 0, -.03, .13); snout.rotation.x = Math.PI / 2; hd.add(snout);
+  hd.add(M(new THREE.SphereGeometry(.03, 8, 6), std('#1a1a1a', { roughness: .3 }), 0, -.01, .22, false));
+  [-1, 1].forEach(k => { const ear = M(new THREE.SphereGeometry(.06, 10, 8), dark, k * .1, .02, -.02); ear.scale.set(.5, 1.4, .9); ear.rotation.z = k * .3; hd.add(ear); hd.add(M(new THREE.SphereGeometry(.018, 8, 6), std('#111', { roughness: .2 }), k * .05, .04, .1, false)); });
+  [[-1, 1], [1, 1], [-1, -1], [1, -1]].forEach(([x, z]) => { const l = M(new THREE.CylinderGeometry(.04, .035, lie ? .12 : .32, 8), c, x * .1, lie ? .06 : .16, z * .24); if (lie) { l.rotation.x = Math.PI / 2; l.position.z += z > 0 ? .12 : 0; } b.add(l); });
+  const tail = M(new THREE.CylinderGeometry(.025, .015, .28, 6), c, 0, by + .12, -.45); tail.rotation.x = -.8; b.add(tail);
+  return g;
+};
+B.cat = p => {
+  const g = new THREE.Group(), c = std(p.color || '#7a7570', { roughness: .9 }), b = new THREE.Group(); g.add(b);
+  const lie = p.pose === 'lie', by = lie ? .1 : .2;
+  const body = M(new THREE.SphereGeometry(.1, 16, 10), c, 0, by, 0); body.scale.set(1, 1, 2); b.add(body);
+  const hd = new THREE.Group(); hd.position.set(0, by + .12, .2); b.add(hd); hd.add(M(new THREE.SphereGeometry(.075, 14, 10), c));
+  [-1, 1].forEach(k => { hd.add(M(new THREE.ConeGeometry(.03, .06, 4), c, k * .045, .07, 0)); hd.add(M(new THREE.SphereGeometry(.012, 6, 6), std('#c9d04a', { roughness: .2 }), k * .03, .01, .065, false)); });
+  if (!lie) [[-1, 1], [1, 1], [-1, -1], [1, -1]].forEach(([x, z]) => b.add(M(new THREE.CylinderGeometry(.022, .02, .16, 6), c, x * .05, .08, z * .12)));
+  const tc = new THREE.CatmullRomCurve3([[0, by, -.18], [0, by + .05, -.3], [.05, by + .2, -.33], [.08, by + .28, -.28]].map(v => new THREE.Vector3(...v)));
+  b.add(M(new THREE.TubeGeometry(tc, 12, .018, 6, false), c));
+  return g;
+};
+const ceramic = () => std('#f6f4ef', { roughness: .25 });
+const glassMat = () => mat('glassware', () => new THREE.MeshPhongMaterial({ color: 0xe8f4f6, specular: 0xffffff, shininess: 120, transparent: true, opacity: .35, envMap: envCube, reflectivity: .6, combine: THREE.MixOperation, side: THREE.DoubleSide, depthWrite: false }));
+const latheG = (pts, seg = 20) => new THREE.LatheGeometry(pts.map(([x, y]) => new THREE.Vector2(x, y)), seg);
+B.tableware = p => {
+  const g = new THREE.Group(), y = p.h ?? .78, n = Math.round(p.n || 4), R = p.r ?? .42, set = p.set || 'dinner';
+  const plate = latheG([[0, 0], [.1, 0], [.13, .012], [.135, .018], [.125, .016], [.09, .006], [0, .006]], 24), glass = latheG([[0, 0], [.035, 0], [.036, .005], [.006, .01], [.005, .1], [.04, .13], [.045, .2], [.043, .2], [.037, .13], [0, .115]], 16);
+  if (set !== 'fruit') for (let i = 0; i < n; i++) {
+    const a = i / n * Math.PI * 2, x = Math.cos(a) * R, z = Math.sin(a) * R, pg = new THREE.Group(); pg.position.set(x, y, z); pg.rotation.y = -a - Math.PI / 2; g.add(pg);
+    if (set === 'dinner') { pg.add(M(plate, ceramic(), 0, 0, 0, false)); pg.add(M(plate, ceramic(), 0, .015, 0, false)).scale.setScalar(.75); [-1, 1].forEach(s => pg.add(M(new THREE.BoxGeometry(.015, .006, .19), steel(), s * .17, .003, 0, false))); const nap = M(new THREE.BoxGeometry(.1, .012, .16), fabric(p.color || '#2f6f8f'), -.24, .006, 0, false); pg.add(nap); }
+    pg.add(M(glass, glassMat(), .12, 0, -.13, false));
+  }
+  const ctr = new THREE.Group(); ctr.position.y = y; g.add(ctr);
+  if (set === 'fruit') { ctr.add(M(latheG([[0, 0], [.06, 0], [.16, .07], [.17, .09], [.155, .085], [0, .02]], 24), std('#8a5a36', { roughness: .5 }))); const r = rng(5); ['#f2c14e', '#e0573a', '#7fb04a', '#f08a1e', '#c23a3a', '#f2c14e', '#7fb04a'].forEach((cc, i) => ctr.add(M(new THREE.SphereGeometry(.04, 12, 10), std(cc, { roughness: .45 }), Math.cos(i * 1.7) * .07 * (i ? 1 : 0), .08 + (i > 4 ? .05 : 0), Math.sin(i * 1.7) * .07 * (i ? 1 : 0), false))); }
+  else {
+    ctr.add(M(latheG([[0, 0], [.08, 0], [.09, .2], [.095, .21], [.085, .21], [0, .02]], 20), steel()));
+    const bottle = M(latheG([[0, 0], [.035, 0], [.036, .2], [.014, .26], [.013, .32], [0, .32]], 14), std('#1f4a2e', { roughness: .2, metalness: .1 }), 0, .02, 0, false); bottle.rotation.z = .25; ctr.add(bottle);
+    const vase = new THREE.Group(); vase.position.set(.18, 0, .05); ctr.add(vase); vase.add(M(latheG([[0, 0], [.04, 0], [.045, .06], [.03, .14], [.035, .16], [0, .02]], 14), glassMat(), 0, 0, 0, false));
+    const r = rng(9); for (let i = 0; i < 5; i++) { const fl = M(new THREE.IcosahedronGeometry(.025, 0), std(['#e05c6e', '#f4f1ea', '#f2c14e'][i % 3], { roughness: .6 }), (r() - .5) * .08, .2 + r() * .06, (r() - .5) * .08, false); vase.add(fl); }
+    vase.add(new Foliage(23).clump(0, .19, 0, .06, .04, .06, 10, .06).mesh('#4a8538'));
+  }
+  return g;
+};
+
 /* ---------------- Catalog ---------------- */
 const CUSH = [['#f4f1ea', 'Blanco'], ['#2f6f8f', 'Azul'], ['#d9a441', 'Mostaza'], ['#6b7b5b', 'Oliva'], ['#c25a43', 'Coral']];
 const TILES = [['#4fa9c6', 'Azul cielo'], ['#2fb3b0', 'Turquesa'], ['#2a5d9f', 'Azul profundo'], ['#9fb0b5', 'Gris perla'], ['#d9cba6', 'Arena'], ['#34474f', 'Pizarra']];
@@ -1154,14 +1281,25 @@ const TYPES = {
   fireplace: { label: 'Chimenea exterior', fields: [['w', 'Ancho', 'num', 1.4, 3.5, .1]] },
   stonewall: { label: 'Muro de piedra', fields: [['w', 'Largo', 'num', .5, 30, .1], ['h', 'Altura', 'num', .3, 2.5, .05]] },
   playset: { label: 'Juegos infantiles', fields: [] },
-  house: { label: 'Casa', fields: [['w', 'Fachada', 'num', 6, 30, .5], ['l', 'Fondo', 'num', 5, 20, .5]] },
+  person: { label: 'Persona', fields: [['kind', 'Tipo', 'sel', [['man', 'Hombre'], ['woman', 'Mujer'], ['child', 'Niño']]], ['pose', 'Postura', 'sel', [['stand', 'De pie'], ['walk', 'Caminando'], ['sit', 'Sentado'], ['wave', 'Saludando']]], ['skin', 'Tono de piel', 'sw', [['#f1d3b8', 'Clara'], ['#c99a76', 'Media'], ['#8d5d3e', 'Morena'], ['#5a3a28', 'Oscura']]], ['shirt', 'Ropa', 'sw', [['#2f6f8f', 'Azul'], ['#f4f1ea', 'Blanco'], ['#c25a43', 'Coral'], ['#6b7b5b', 'Oliva'], ['#d9a441', 'Mostaza'], ['#2b2d30', 'Negro']]], ['hair', 'Cabello', 'sw', [['#2a1d14', 'Castaño oscuro'], ['#6b4a2b', 'Castaño'], ['#d8b26a', 'Rubio'], ['#111111', 'Negro'], ['#b9b5ad', 'Canoso']]]] },
+  dog: { label: 'Perro', fields: [['s', 'Tamaño', 'num', .5, 1.5, .05], ['pose', 'Postura', 'sel', [['stand', 'De pie'], ['lie', 'Echado']]], ['color', 'Color', 'sw', [['#c8954f', 'Dorado'], ['#2a2420', 'Negro'], ['#efe9dd', 'Blanco'], ['#6b4428', 'Café']]]] },
+  cat: { label: 'Gato', fields: [['pose', 'Postura', 'sel', [['stand', 'De pie'], ['lie', 'Echado']]], ['color', 'Color', 'sw', [['#7a7570', 'Gris'], ['#d98a3a', 'Naranja'], ['#1d1b1a', 'Negro'], ['#efe9dd', 'Blanco']]]] },
+  tableware: { label: 'Accesorios de mesa', fields: [['set', 'Juego', 'sel', [['dinner', 'Cena (platos, cubiertos, copas)'], ['drinks', 'Bebidas (copas y hielera)'], ['fruit', 'Frutero']]], ['n', 'Lugares', 'int', 1, 10, 1], ['r', 'Radio de la mesa', 'num', .2, 1.2, .05], ['h', 'Altura de la mesa', 'num', .4, 1.1, .01], ['color', 'Servilletas', 'sw', [['#2f6f8f', 'Azul'], ['#f4f1ea', 'Blanco'], ['#c25a43', 'Coral'], ['#6b7b5b', 'Oliva'], ['#d9a441', 'Mostaza'], ['#2b2d30', 'Negro']]]] },
+  house: { label: 'Casa', fields: [['w', 'Fachada', 'num', 6, 30, .5], ['l', 'Fondo', 'num', 5, 20, .5],
+    ['door', 'Puerta principal', 'sel', [['slide', 'Corrediza de vidrio'], ['french', 'Francesa (dos hojas)'], ['single', 'Madera sencilla'], ['none', 'Sin puerta']]],
+    ['dw', 'Ancho de puerta', 'num', .9, 4.5, .1, p => p.door !== 'none'], ['dpos', 'Posición de la puerta', 'sel', [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']], 0, 0, p => p.door !== 'none'],
+    ['fw', 'Ventanas al frente', 'int', 0, 8, 1], ['sw', 'Ventanas por costado', 'int', 0, 5, 1], ['bw', 'Ventanas atrás', 'int', 0, 8, 1],
+    ['ww', 'Ancho de ventana', 'num', .5, 3, .05], ['wh', 'Alto de ventana', 'num', .5, 2.2, .05],
+    ['frame', 'Marcos', 'sw', [['#f8f8f8', 'Blanco'], ['#2b2d30', 'Negro'], ['wood', 'Madera'], ['#7a5a3a', 'Bronce']]],
+    ['wall', 'Muros', 'sw', [['stucco', 'Blanco hueso'], ['#d8cbb0', 'Arena'], ['#b9bcbc', 'Gris'], ['#d9a27f', 'Terracota'], ['#9fb3a0', 'Salvia']]]] },
 };
 const CATALOG = [
   ['Piscinas', [['Dibujar forma libre', 'draw', {}], ['Riñón', 'pool', { shape: 'free', smooth: true, pts: KIDNEY, w: 8, l: 4.4, d: 1.5, tile: '#2fb3b0', coping: 'trav', lights: 3 }], ['Rectangular', 'pool', { shape: 'rect', w: 8, l: 4, d: 1.5, tile: '#4fa9c6', coping: 'trav', lights: 3 }], ['Ovalada', 'pool', { shape: 'oval', w: 7, l: 3.8, d: 1.5, tile: '#2fb3b0', coping: 'trav', lights: 3 }], ['En L', 'pool', { shape: 'L', w: 9, l: 6, d: 1.6, tile: '#4fa9c6', coping: 'concrete', lights: 4 }], ['Spa / jacuzzi', 'pool', { shape: 'oval', w: 2.4, l: 2.4, d: .9, tile: '#2a5d9f', coping: 'dark', lights: 2 }], ['Chorros laminares', 'jets', { n: 2, w: 2.2 }], ['Bocas de agua', 'scupper', { n: 3, h: 1.2 }], ['Burbujeador', 'bubbler', {}], ['Tazón de fuego', 'firebowl', { h: .7, color: '#7a746c' }], ['Cascada', 'waterfall', { w: 1.2, h: .8 }], ['Tobogán', 'slide', { color: '#2f8fd0' }]]],
   ['Pisos', [['Madera', 'deck', { mat: 'wood', w: 6, l: 4 }], ['Travertino', 'deck', { mat: 'trav', w: 12, l: 7 }], ['Concreto', 'deck', { mat: 'concrete', w: 6, l: 4 }], ['Adoquín', 'deck', { mat: 'pavers', w: 2, l: 8 }]]],
   ['Plantas', [['Palmera', 'palm', { h: 6 }], ['Árbol', 'tree', { h: 6 }], ['Arbusto', 'bush', { s: 1 }], ['Arbusto con flor', 'bush', { s: 1, flower: '#e0577a' }], ['Jardinera', 'planter', { w: 2.4 }], ['Seto', 'hedge', { w: 4, h: 1.2 }], ['Agave', 'agave', { s: 1 }], ['Cactus', 'cactus', { h: 2.2 }], ['Maceta', 'pot', { s: 1, color: '#b5734f' }], ['Rocas', 'rocks', { s: 1.2 }], ['Ciprés', 'cypress', { h: 4 }], ['Pasto ornamental', 'grass', { s: 1, color: '#9aa25a' }], ['Ave del paraíso', 'bird', { s: 1.3 }], ['Topiario', 'topiary', { shape: 'ball', s: 1 }]]],
   ['Muebles', [['Camastro', 'lounger', { color: '#f4f1ea' }], ['Sombrilla', 'umbrella', { size: 2.6, color: '#f4f1ea' }], ['Comedor', 'dining', { color: '#2f6f8f' }], ['Sofá', 'sofa', { color: '#f4f1ea' }], ['Fogatero', 'firepit', {}], ['Luminaria', 'lamp', {}], ['Asador', 'grill', {}], ['Cocina exterior', 'kitchen', { w: 3 }], ['Hamaca', 'hammock', { color: '#d9a441' }], ['Regadera', 'shower', {}], ['Cama de sol', 'daybed', { color: '#f4f1ea' }], ['Barra con bancos', 'barset', { w: 2.4, color: '#2f6f8f' }], ['Silla Adirondack', 'adirondack', { color: '#f2f0ea' }], ['Silla colgante', 'swing', { color: '#f4f1ea' }]]],
-  ['Estructuras', [['Pérgola', 'pergola', { w: 4, l: 3, h: 2.7, color: '#8a6a4a' }], ['Muro', 'wall', { w: 6, h: 1.8, color: 'stucco' }], ['Palapa', 'palapa', { w: 4.5 }], ['Vela de sombra', 'sail', { w: 5, color: '#f4f1ea' }], ['Reja metálica', 'fence', { w: 6, h: 1.4, color: '#2b2d30' }], ['Gazebo', 'gazebo', { w: 3.6, color: '#e8e2d6' }], ['Fuente', 'fountain', { s: 1, color: '#d9d2c3' }], ['Chimenea exterior', 'fireplace', { w: 2 }], ['Muro de piedra', 'stonewall', { w: 6, h: .8 }], ['Juegos infantiles', 'playset', {}], ['Casa', 'house', { w: 14, l: 8 }]]],
+  ['Estructuras', [['Pérgola', 'pergola', { w: 4, l: 3, h: 2.7, color: '#8a6a4a' }], ['Muro', 'wall', { w: 6, h: 1.8, color: 'stucco' }], ['Palapa', 'palapa', { w: 4.5 }], ['Vela de sombra', 'sail', { w: 5, color: '#f4f1ea' }], ['Reja metálica', 'fence', { w: 6, h: 1.4, color: '#2b2d30' }], ['Gazebo', 'gazebo', { w: 3.6, color: '#e8e2d6' }], ['Fuente', 'fountain', { s: 1, color: '#d9d2c3' }], ['Chimenea exterior', 'fireplace', { w: 2 }], ['Muro de piedra', 'stonewall', { w: 6, h: .8 }], ['Juegos infantiles', 'playset', {}], ['Casa', 'house', { w: 14, l: 8 }]]],,
+  ['Personas', [['Hombre', 'person', { kind: 'man', pose: 'stand', skin: '#c99a76', shirt: '#2f6f8f', hair: '#2a1d14' }], ['Mujer', 'person', { kind: 'woman', pose: 'stand', skin: '#f1d3b8', shirt: '#c25a43', hair: '#6b4a2b' }], ['Niño', 'person', { kind: 'child', pose: 'wave', skin: '#c99a76', shirt: '#d9a441', hair: '#2a1d14' }], ['Persona sentada', 'person', { kind: 'man', pose: 'sit', skin: '#8d5d3e', shirt: '#f4f1ea', hair: '#111111' }], ['Perro', 'dog', { s: 1, pose: 'stand', color: '#c8954f' }], ['Gato', 'cat', { pose: 'stand', color: '#7a7570' }], ['Accesorios de mesa', 'tableware', { set: 'dinner', n: 4, r: .42, h: .78, color: '#2f6f8f' }]]]
 ];
 
 /* ---------------- State ---------------- */
@@ -1408,7 +1546,7 @@ function renderProps() {
     } else if (kind === 'sw') {
       f.innerHTML = `<label>${label}</label><div class="swatches" role="group" aria-label="${label}"></div>`;
       const sw = f.querySelector('.swatches');
-      a.forEach(([v, n]) => { const b = document.createElement('button'); b.title = n; b.setAttribute('aria-label', n); b.style.background = v === 'stucco' ? '#f1ece2' : v; if (v === it.p[k]) b.className = 'on'; b.onclick = () => { sw.querySelectorAll('button').forEach(x => x.className = ''); b.className = 'on'; change(k, v); commit(); }; sw.append(b); });
+      a.forEach(([v, n]) => { const b = document.createElement('button'); b.title = n; b.setAttribute('aria-label', n); b.style.background = v === 'stucco' ? '#f1ece2' : v === 'wood' ? '#8a5a36' : v; if (v === it.p[k]) b.className = 'on'; b.onclick = () => { sw.querySelectorAll('button').forEach(x => x.className = ''); b.className = 'on'; change(k, v); commit(); }; sw.append(b); });
     }
     body.append(f);
   });
@@ -1560,7 +1698,7 @@ function quoteLines() {
   const dk = {}; items.filter(i => i.type === 'deck').forEach(i => { dk[i.p.mat] = (dk[i.p.mat] || 0) + i.p.w * i.p.l; });
   const dr = Object.entries(dk).map(([m, a]) => row(`Piso de ${SURF_N[m]} (incluye 10 % de merma)`, `${SURF_EN[m].replace(/^./, c => c.toUpperCase())} decking (includes 10% waste)`, a * 1.1, 'm2', P['deck_' + m]));
   if (dr.length) secs.push({ title: L('Pisos y terraza', 'Decking and hardscape'), rows: dr });
-  const ot = {}; items.forEach(i => { if (['pool', 'deck', 'house'].includes(i.type)) return; let q = 1; if (i.type === 'hedge') q = i.p.w; if (i.type === 'wall') q = i.p.w * i.p.h; if (i.type === 'pergola') q = i.p.w * i.p.l; if (i.type === 'kitchen' || i.type === 'fence') q = i.p.w; if (i.type === 'palapa') q = i.p.w * i.p.w; if (i.type === 'stonewall') q = i.p.w * i.p.h; if (i.type === 'jets') q = Math.round(i.p.n || 1); ot[i.type] = (ot[i.type] || 0) + q; });
+  const ot = {}; items.forEach(i => { if (['pool', 'deck', 'house', 'person', 'dog', 'cat', 'tableware'].includes(i.type)) return; let q = 1; if (i.type === 'hedge') q = i.p.w; if (i.type === 'wall') q = i.p.w * i.p.h; if (i.type === 'pergola') q = i.p.w * i.p.l; if (i.type === 'kitchen' || i.type === 'fence') q = i.p.w; if (i.type === 'palapa') q = i.p.w * i.p.w; if (i.type === 'stonewall') q = i.p.w * i.p.h; if (i.type === 'jets') q = Math.round(i.p.n || 1); ot[i.type] = (ot[i.type] || 0) + q; });
   const un = { hedge: 'ml', wall: 'm2', pergola: 'm2', dining: 'set', kitchen: 'ml', fence: 'ml', palapa: 'm2', rocks: 'lot', stonewall: 'm2', barset: 'set', playset: 'set' };
   const orr = Object.entries(ot).map(([t, q]) => row(TYPES[t].label, EN_LABEL[t] || TYPES[t].label, q, un[t] || 'pz', P[t]));
   if (orr.length) secs.push({ title: L('Jardín, mobiliario y estructuras', 'Landscape, furniture and structures'), rows: orr });

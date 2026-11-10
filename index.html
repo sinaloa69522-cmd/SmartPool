@@ -88,6 +88,7 @@ button{cursor:pointer}
 .btn.solid{background:var(--pool);border-color:var(--pool);color:#fff}
 .btn.solid:hover{filter:brightness(1.08);color:#fff}
 .btn.on{background:var(--pool-soft);border-color:var(--pool);color:var(--pool)}
+#btnSound:not(.on) .w1,#btnSound:not(.on) .w2{opacity:.3}
 .btn svg{width:16px;height:16px}
 .btn.icon{padding:6px}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
@@ -272,6 +273,7 @@ body.presenting #topbar,body.presenting #catalog,body.presenting #props,body.pre
   <label class="time" title="Hora del día"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e9a93a" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/></svg>
     <input type="range" id="time" min="6" max="22" step="0.25" value="15.5" aria-label="Hora del día"><output id="timeOut">15:30</output></label>
   <span class="spacer"></span>
+  <button class="btn icon" id="btnSound" title="Sonido ambiente (agua y viento)" aria-label="Sonido ambiente" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="w1" d="M16.5 8.5a5 5 0 0 1 0 7"/><path class="w2" d="M19 6a8.5 8.5 0 0 1 0 12"/></svg></button>
   <button class="btn icon hide-sm" id="btnShot" title="Captura de pantalla" aria-label="Captura de pantalla"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
   <button class="btn icon hide-sm" id="btnExport" title="Exportar proyecto (.json)" aria-label="Exportar proyecto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3"/></svg></button>
   <button class="btn" id="btnPresent" title="Recorrido a pantalla completa para el cliente"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 5v14l11-7z"/></svg>Presentar</button>
@@ -740,10 +742,25 @@ const BARK_TEX = canvasTex(128, (g, s) => {
   const r = rng(35); g.fillStyle = '#6a5642'; g.fillRect(0, 0, s, s);
   for (let i = 0; i < 160; i++) { g.strokeStyle = r() > .5 ? 'rgba(40,30,20,.5)' : 'rgba(150,130,105,.35)'; g.lineWidth = 1 + r() * 2; const x = r() * s; g.beginPath(); g.moveTo(x, 0); g.bezierCurveTo(x + (r() - .5) * 8, s * .3, x + (r() - .5) * 8, s * .7, x + (r() - .5) * 6, s); g.stroke(); }
 });
-const leafDepth = tex => mat('ldepth' + tex.uuid, () => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: .5, side: THREE.DoubleSide }));
-const foliageMat = (color, tex = LEAF_TEX) => mat('fol' + color + tex.uuid, () => new THREE.MeshStandardMaterial({ map: tex, color, alphaTest: .5, side: THREE.DoubleSide, roughness: .72, envMapIntensity: .6 }));
+// Wind: leaves sway with slow gusts plus a fast flutter; displacement grows with distance from the plant's base
+const WIND = { t: { value: 0 }, s: { value: 1 } };
+function windify(m, k) {
+  if (!k) return m;
+  const K = k.toFixed(4);
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uWT = WIND.t; sh.uniforms.uWS = WIND.s;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nuniform float uWT; uniform float uWS;').replace('#include <begin_vertex>', `#include <begin_vertex>
+      { vec4 wp = modelMatrix * vec4(position, 1.0); float d = length(position); float ph = wp.x * .35 + wp.z * .27;
+        float sw = (sin(uWT * 1.3 + ph) * .65 + sin(uWT * 2.9 + ph * 1.7) * .25) * uWS;
+        float fl = sin(uWT * 8.0 + (wp.x + wp.y + wp.z) * 5.0) * .3 * uWS;
+        transformed.x += (sw + fl * .35) * d * ${K}; transformed.z += (sw * .5 + fl * .3) * d * ${K}; transformed.y += fl * d * ${K} * .35; }`);
+  };
+  m.customProgramCacheKey = () => 'wind' + K; return m;
+}
+const leafDepth = (tex, k = 0) => mat('ldepth' + tex.uuid + k, () => windify(new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: .5, side: THREE.DoubleSide }), k));
+const foliageMat = (color, tex = LEAF_TEX, k = 0) => mat('fol' + color + tex.uuid + k, () => windify(new THREE.MeshStandardMaterial({ map: tex, color, alphaTest: .5, side: THREE.DoubleSide, roughness: .72, envMapIntensity: .6 }), k));
 const barkMat = () => mat('bark', () => new THREE.MeshStandardMaterial({ map: BARK_TEX, normalMap: normalFrom(BARK_TEX, 4), roughness: .95 }));
-function leafMesh(geo, material, tex = LEAF_TEX) { const m = new THREE.Mesh(geo, material); m.castShadow = true; m.receiveShadow = true; m.customDepthMaterial = leafDepth(tex); return m; }
+function leafMesh(geo, material, tex = LEAF_TEX, k = 0) { const m = new THREE.Mesh(geo, material); m.castShadow = true; m.receiveShadow = true; m.customDepthMaterial = leafDepth(tex, k); return m; }
 // Accumulates leaf cards for one plant; normals point away from each clump's centre so the canopy shades like a volume
 class Foliage {
   constructor(seed) { this.r = rng(seed); this.P = []; this.N = []; this.U = []; this.I = []; }
@@ -775,7 +792,7 @@ class Foliage {
     return this;
   }
   geo() { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(this.P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(this.N, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(this.U, 2)); g.setIndex(this.I); g.computeBoundingSphere(); return g; }
-  mesh(color) { return leafMesh(this.geo(), foliageMat(color)); }
+  mesh(color, k = .012) { return leafMesh(this.geo(), foliageMat(color, LEAF_TEX, k), LEAF_TEX, k); }
 }
 // Dense dark core so the canopy never looks see-through
 const coreMesh = (color, x, y, z, rx, ry, rz) => { const m = M(new THREE.IcosahedronGeometry(1, 2), std(shade(color, -.06), { roughness: 1 }), x, y, z, false); m.scale.set(rx, ry, rz); return m; };
@@ -800,13 +817,13 @@ B.palm = p => {
   const top = curve.getPointAt(1);
   g.add(M(new THREE.SphereGeometry(.26, 12, 8), std('#6e5a3a', { roughness: 1 }), top.x, top.y - .05, top.z));
   [0, 2.1, 4.2].forEach(a => g.add(M(new THREE.SphereGeometry(.1, 10, 8), std('#5c4a2a', { roughness: .6 }), top.x + Math.cos(a) * .2, top.y - .22, top.z + Math.sin(a) * .2)));
-  const fm = foliageMat('#5a8f34', FROND_TEX), dead = foliageMat('#a08a55', FROND_TEX), sc = Math.min(1.35, .65 + p.h * .08);
+  const fm = foliageMat('#5a8f34', FROND_TEX, .045), dead = foliageMat('#a08a55', FROND_TEX, .02), sc = Math.min(1.35, .65 + p.h * .08);
   const n = 16;
   for (let i = 0; i < n; i++) {
     const layer = i % 3, a = i / n * Math.PI * 2 + r() * .3, L = (2.6 + r() * .8) * sc * (layer === 0 ? .85 : 1), lift = [.85, .45, .1][layer] + (r() - .5) * .2, droop = [.55, .7, .8][layer];
-    const f = leafMesh(frondGeo(L, .95 * sc, lift, droop), fm, FROND_TEX); f.position.copy(top); f.rotation.y = a; f.rotateX((r() - .5) * .5); g.add(f);
+    const f = leafMesh(frondGeo(L, .95 * sc, lift, droop), fm, FROND_TEX, .045); f.position.copy(top); f.rotation.y = a; f.rotateX((r() - .5) * .5); g.add(f);
   }
-  for (let i = 0; i < 3; i++) { const f = leafMesh(frondGeo(2.1 * sc, .7 * sc, -.9, .2), dead, FROND_TEX); f.position.set(top.x, top.y - .2, top.z); f.rotation.y = r() * 6.28; g.add(f); }
+  for (let i = 0; i < 3; i++) { const f = leafMesh(frondGeo(2.1 * sc, .7 * sc, -.9, .2), dead, FROND_TEX, .02); f.position.set(top.x, top.y - .2, top.z); f.rotation.y = r() * 6.28; g.add(f); }
   return g;
 };
 B.tree = p => {
@@ -829,7 +846,7 @@ B.bush = p => {
   const g = new THREE.Group(), r = rng(p.s * 77 | 0), col = p.flower ? '#467a35' : '#4f8a3a', fol = new Foliage(p.s * 53 | 0);
   const pts = [];
   for (let i = 0; i < 4; i++) { const s = p.s * (.33 + r() * .15), x = (r() - .5) * p.s * .55, z = (r() - .5) * p.s * .55; pts.push([x, s * .85, z, s]); fol.clump(x, s * .85, z, s, s * .8, s, 40, p.s * .38); g.add(coreMesh(col, x, s * .8, z, s * .72, s * .55, s * .72)); }
-  g.add(fol.mesh(col));
+  g.add(fol.mesh(col, .03));
   if (p.flower) {
     const fm = std(p.flower, { roughness: .6 }), geo = new THREE.IcosahedronGeometry(.045 * p.s + .02, 0);
     for (let i = 0; i < 36; i++) { const [x, y, z, s] = pts[i % pts.length], a = r() * 6.28, u = r() * .9; g.add(M(geo, fm, x + Math.cos(a) * s * Math.cos(u) * .95, y + s * .8 * Math.sin(u), z + Math.sin(a) * s * Math.cos(u) * .95, false)); }
@@ -843,7 +860,7 @@ B.planter = p => {
   g.add(M(new THREE.BoxGeometry(p.w - .1, .02, .7), std('#3d2e21', { roughness: 1 }), 0, .5, 0, false));
   const r = rng(p.w * 31 | 0), fm = ['#e05c6e', '#f2c14e', '#ffffff', '#b06bd6'], fol = new Foliage(p.w * 19 | 0), n = Math.round(p.w * 3);
   for (let i = 0; i < n; i++) { const x = -p.w / 2 + .25 + (i + r() * .4) * (p.w - .5) / n, z = (r() - .5) * .3; fol.clump(x, .72, z, .26, .2, .26, 22, .22); const c = std(fm[(r() * 4) | 0], { roughness: .6 }); for (let k = 0; k < 4; k++) g.add(M(new THREE.IcosahedronGeometry(.045, 0), c, x + (r() - .5) * .35, .82 + r() * .1, z + (r() - .5) * .3, false)); }
-  g.add(fol.mesh('#4a8538'));
+  g.add(fol.mesh('#4a8538', .004));
   return g;
 };
 B.lounger = p => {
@@ -902,7 +919,7 @@ B.wall = p => {
 B.hedge = p => {
   const g = new THREE.Group(), col = '#3c6a2c', d = .7;
   g.add(M(new THREE.BoxGeometry(p.w - .1, p.h - .08, d - .12), std('#355f27', { roughness: 1 }), 0, (p.h - .08) / 2, 0));
-  g.add(new Foliage(p.w * 13 | 0).box(p.w, p.h, d, 20, .48).mesh(col));
+  g.add(new Foliage(p.w * 13 | 0).box(p.w, p.h, d, 20, .48).mesh(col, .0025));
   return g;
 };
 const ROOF_TEX = canvasTex(256, (g, s) => { const r = rng(71); g.fillStyle = '#55595e'; g.fillRect(0, 0, s, s); for (let i = 0; i < 8; i++) { const x = i * s / 8; g.fillStyle = '#3c3f43'; g.fillRect(x, 0, 3, s); g.fillStyle = '#6b7075'; g.fillRect(x + 3, 0, 2, s); } for (let i = 0; i < 500; i++) { g.fillStyle = `rgba(${r() > .5 ? '255,255,255' : '0,0,0'},.04)`; g.fillRect(r() * s, r() * s, 2, 6); } }, .5);
@@ -983,7 +1000,7 @@ B.grass = p => {
     for (let k = 0; k <= 5; k++) { const t = k / 5, rad = Math.sin(t * out * 1.6) * H * .55 * out, y = H * Math.sin(t * 1.35) / Math.sin(1.35) * (1 - t * out * .25), ww = w * (1 - t * .9); const x = ox + Math.cos(a) * rad, z = oz + Math.sin(a) * rad; P.push(x - Math.sin(a) * ww, y, z + Math.cos(a) * ww, x + Math.sin(a) * ww, y, z - Math.cos(a) * ww); if (k < 5) { const q = base + k * 2; I.push(q, q + 1, q + 2, q + 1, q + 3, q + 2); } }
   }
   const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); geo.setIndex(I); geo.computeVertexNormals();
-  g.add(M(geo, std(p.color || '#9aa25a', { side: THREE.DoubleSide, roughness: .8 })));
+  g.add(M(geo, mat('grassOrn' + (p.color || '#9aa25a'), () => windify(new THREE.MeshStandardMaterial({ color: p.color || '#9aa25a', side: THREE.DoubleSide, roughness: .8 }), .05))));
   if (p.plume !== false) { const pm = std('#e8dcc0', { roughness: 1 }); for (let i = 0; i < 9; i++) { const a = r() * 6.28, d = r() * .25 * s, h = s * (1.1 + r() * .3); const pl = M(new THREE.SphereGeometry(.05 * s, 6, 6), pm, Math.cos(a) * d, h, Math.sin(a) * d); pl.scale.y = 3; pl.rotation.z = (r() - .5) * .5; g.add(pl); const st = M(new THREE.CylinderGeometry(.005, .005, h, 3), pm, Math.cos(a) * d * .5, h / 2, Math.sin(a) * d * .5, false); g.add(st); } }
   return g;
 };
@@ -1007,7 +1024,7 @@ B.topiary = p => {
   if (shape !== 'ball') g.add(M(new THREE.CylinderGeometry(.025 * s, .03 * s, 1.9 * s, 6), barkMat(), 0, 1.3 * s, 0));
   balls.forEach(([y, rr]) => { fol.clump(0, y * s, 0, rr * s, rr * s, rr * s, 70, .16 * s); g.add(coreMesh(col, 0, y * s, 0, rr * s * .85, rr * s * .85, rr * s * .85)); });
   if (shape === 'cone') for (let i = 0; i < 6; i++) { const t = i / 5, y = (.6 + t * 1.3) * s, rr = (.42 * (1 - t) + .06) * s; fol.clump(0, y, 0, rr, .2 * s, rr, 34, .15 * s); g.add(coreMesh(col, 0, y, 0, rr * .85, .17 * s, rr * .85)); }
-  g.add(fol.mesh(col)); return g;
+  g.add(fol.mesh(col, .004)); return g;
 };
 B.daybed = p => {
   const g = new THREE.Group(), fr = woodM('#d8cfc2'), cu = fabric(p.color), dr = mat('drape' + p.color, () => new THREE.MeshStandardMaterial({ color: p.color, map: FABRIC_TEX, side: THREE.DoubleSide, roughness: 1, transparent: true, opacity: .92 }));
@@ -1226,7 +1243,7 @@ B.tableware = p => {
     const bottle = M(latheG([[0, 0], [.035, 0], [.036, .2], [.014, .26], [.013, .32], [0, .32]], 14), std('#1f4a2e', { roughness: .2, metalness: .1 }), 0, .02, 0, false); bottle.rotation.z = .25; ctr.add(bottle);
     const vase = new THREE.Group(); vase.position.set(.18, 0, .05); ctr.add(vase); vase.add(M(latheG([[0, 0], [.04, 0], [.045, .06], [.03, .14], [.035, .16], [0, .02]], 14), glassMat(), 0, 0, 0, false));
     const r = rng(9); for (let i = 0; i < 5; i++) { const fl = M(new THREE.IcosahedronGeometry(.025, 0), std(['#e05c6e', '#f4f1ea', '#f2c14e'][i % 3], { roughness: .6 }), (r() - .5) * .08, .2 + r() * .06, (r() - .5) * .08, false); vase.add(fl); }
-    vase.add(new Foliage(23).clump(0, .19, 0, .06, .04, .06, 10, .06).mesh('#4a8538'));
+    vase.add(new Foliage(23).clump(0, .19, 0, .06, .04, .06, 10, .06).mesh('#4a8538', 0));
   }
   return g;
 };
@@ -2053,6 +2070,7 @@ function stopPresent() {
   flyTo(cam, tgt);
 }
 $('#btnPresent').onclick = startPresent;
+$('#btnSound').onclick = () => setAmbient(!AMB.on);
 $('#presExit').onclick = stopPresent;
 $('#presPrev').onclick = () => { presPlay(false); presGo(pres.i - 1); };
 $('#presNext').onclick = () => { presPlay(false); presGo(pres.i + 1); };
@@ -2099,6 +2117,67 @@ window.addEventListener('keydown', e => {
   else if (k === 'escape') select(null);
 });
 
+/* ---------------- Ambient sound (generated, no audio files) ---------------- */
+const AMB = { ctx: null, on: false, acc: 0, fire: 0 };
+function ambInit() {
+  const C = new (window.AudioContext || window.webkitAudioContext)(), N = C.sampleRate * 4;
+  const white = C.createBuffer(1, N, C.sampleRate), brown = C.createBuffer(1, N, C.sampleRate), w = white.getChannelData(0), b = brown.getChannelData(0);
+  let last = 0; for (let i = 0; i < N; i++) { w[i] = Math.random() * 2 - 1; last = (last + .02 * w[i]) / 1.02; b[i] = last * 3.5; }
+  // short fades at the loop seam so it never clicks
+  const F = 2000; for (let i = 0; i < F; i++) { const k = i / F; w[i] *= k; w[N - 1 - i] *= k; b[i] *= k; b[N - 1 - i] *= k; }
+  const loop = (buf, rate = 1, off = 0) => { const s = C.createBufferSource(); s.buffer = buf; s.loop = true; s.playbackRate.value = rate; s.start(0, off); return s; };
+  const filt = (type, f, q = .7) => { const x = C.createBiquadFilter(); x.type = type; x.frequency.value = f; x.Q.value = q; return x; };
+  const gain = v => { const g = C.createGain(); g.gain.value = v; return g; };
+  const master = gain(0); master.connect(C.destination);
+  const comp = C.createDynamicsCompressor(); comp.connect(master);
+  // pool: low lapping water
+  const calm = gain(0); loop(brown, 1).connect(filt('lowpass', 520)).connect(calm).connect(comp);
+  const lap = gain(0); loop(brown, 1.35, 1.3).connect(filt('bandpass', 700, 1.2)).connect(lap).connect(comp);
+  // falling water: waterfalls, jets, fountains
+  const splash = gain(0); loop(white, 1).connect(filt('bandpass', 1400, .45)).connect(filt('lowshelf', 300)).connect(splash).connect(comp);
+  const splashLo = gain(0); loop(brown, .8, 2.1).connect(filt('lowpass', 900)).connect(splashLo).connect(comp);
+  // wind through leaves
+  const wind = gain(0), wf = filt('bandpass', 2600, .35); loop(white, 1, 1.7).connect(wf).connect(wind).connect(comp);
+  const windLo = gain(0); loop(brown, .6, .4).connect(filt('lowpass', 380)).connect(windLo).connect(comp);
+  AMB.ctx = C; AMB.n = { master, comp, calm, lap, splash, splashLo, wind, wf, windLo }; AMB.white = white;
+}
+function ambCrackle(v) {
+  const C = AMB.ctx, s = C.createBufferSource(), g = C.createGain(), f = C.createBiquadFilter(), t = C.currentTime, d = .015 + Math.random() * .05;
+  s.buffer = AMB.white; f.type = 'highpass'; f.frequency.value = 1200 + Math.random() * 2500; g.gain.setValueAtTime(v * (.3 + Math.random() * .7), t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  s.connect(f).connect(g).connect(AMB.n.comp || AMB.n.master); s.start(t, Math.random() * 3, d + .02);
+}
+function setAmbient(on) {
+  try {
+    if (on && !AMB.ctx) ambInit();
+    if (!AMB.ctx) return;
+    AMB.on = on; if (on) AMB.ctx.resume();
+    AMB.n.master.gain.setTargetAtTime(on ? .9 : 0, AMB.ctx.currentTime, .4);
+    if (!on) setTimeout(() => { if (!AMB.on) AMB.ctx.suspend(); }, 1500);
+  } catch (e) { toast('Este navegador no permite reproducir sonido.'); AMB.on = false; }
+  const b = $('#btnSound'); if (b) { b.classList.toggle('on', AMB.on); b.title = AMB.on ? 'Apagar sonido ambiente' : 'Sonido ambiente (agua y viento)'; b.setAttribute('aria-pressed', AMB.on); }
+}
+const FALL_W = { waterfall: p => .9 + p.w * .25, scupper: p => .35 + (p.n || 3) * .15, jets: p => .3 * (p.n || 1), fountain: p => .6 * (p.s || 1), bubbler: () => .3, slide: () => .15 };
+const LEAF_W = { palm: 1, tree: 1, cypress: .5, bush: .25, hedge: .08, grass: .3, bird: .2 };
+function ambUpdate(dt, gust) {
+  if (!AMB.on || !AMB.ctx) return;
+  AMB.acc += dt; if (AMB.acc < .12) return; AMB.acc = 0;
+  const live = editing() || pres, cp = camera.position, T = AMB.ctx.currentTime, near = (it, R) => { const d = Math.hypot(cp.x - it.x, cp.z - it.z) + Math.max(0, cp.y - 2) * .5; return 1 / (1 + (d / R) * (d / R)); };
+  let pool = 0, fall = 0, leaf = 0, fire = 0;
+  if (live) items.forEach(it => {
+    if (it.type === 'pool') pool = Math.max(pool, near(it, 6 + Math.max(it.p.w, it.p.l) * .4));
+    else if (FALL_W[it.type]) fall += FALL_W[it.type](it.p) * near(it, 7);
+    else if (LEAF_W[it.type]) leaf += LEAF_W[it.type] * (it.type === 'hedge' ? it.p.w : 1) * near(it, 14);
+    else if (['firepit', 'firebowl', 'fireplace'].includes(it.type)) fire += near(it, 5);
+  });
+  const n = AMB.n, lapMod = .55 + .45 * Math.sin(performance.now() / 1000 * .9) * Math.sin(performance.now() / 1000 * .37);
+  n.calm.gain.setTargetAtTime(pool * .55, T, .3); n.lap.gain.setTargetAtTime(pool * .25 * lapMod, T, .25);
+  fall = Math.min(fall, 1.4); n.splash.gain.setTargetAtTime(fall * .22, T, .3); n.splashLo.gain.setTargetAtTime(fall * .35, T, .3);
+  leaf = Math.min(leaf, 3) / 3; const g = .25 + .75 * gust;
+  n.wind.gain.setTargetAtTime(leaf * .3 * g, T, .5); n.wf.frequency.setTargetAtTime(2000 + gust * 1600, T, .6); n.windLo.gain.setTargetAtTime((.08 + leaf * .2) * g * (live ? 1 : 0), T, .6);
+  fire = Math.min(fire, 1); if (fire > .03) { const k = Math.random(); if (k < fire * .9) ambCrackle(fire * .5); if (k < fire * .3) setTimeout(() => AMB.on && ambCrackle(fire * .35), 40 + Math.random() * 60); }
+}
+document.addEventListener('visibilitychange', () => { if (!AMB.ctx || !AMB.on) return; document.hidden ? AMB.ctx.suspend() : AMB.ctx.resume(); });
+
 /* ---------------- Loop ---------------- */
 function resize() { const w = window.innerWidth, h = window.innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
 window.addEventListener('resize', resize); resize();
@@ -2109,6 +2188,8 @@ function tick(now) {
   const dt = Math.min((now - last) / 1000, .1); last = now;
   waterNormal.offset.x += dt * .02; waterNormal.offset.y += dt * .013;
   caustTex.offset.x += dt * .025; caustTex.offset.y -= dt * .018; fallTex.offset.y += dt * 1.4;
+  WIND.t.value += dt; const ts = WIND.t.value, gust = Math.max(0, Math.min(1, .5 + .35 * Math.sin(ts * .23) * Math.sin(ts * .11 + 1) + .2 * Math.sin(ts * .61)));
+  WIND.s.value = .35 + gust * .9; ambUpdate(dt, gust);
   if (anim) { const k = Math.min((now - anim.s) / anim.d, 1), e = anim.d > 1000 ? (k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2) : 1 - Math.pow(1 - k, 3); camera.position.lerpVectors(anim.p0, anim.p1, e); controls.target.lerpVectors(anim.t0, anim.t1, e); if (k >= 1) anim = null; }
   controls.update(); sky.position.copy(camera.position); tickDims();
   if (selBox.visible && selected) selBox.setFromObject(meshes.get(selected.id));
